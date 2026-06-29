@@ -13,9 +13,9 @@ spring:
       credentials:
         # Uses IAM role automatically on ECS/EC2 — no keys needed in env
       sqs:
-        # Override with VPC endpoint URL in air-gapped environments:
-        # endpoint: https://vpce-xxx.sqs.us-east-1.vpce.amazonaws.com
         endpoint: ${AWS_SQS_ENDPOINT:}
+      sns:
+        endpoint: ${AWS_SNS_ENDPOINT:}
 
 management:
   endpoints:
@@ -32,32 +32,23 @@ sentry:
   traces-sample-rate: 0.1
 
 kms:
-  # AWS KMS
   region: ${AWS_REGION:us-east-1}
   key-id: ${KMS_KEY_ID}
-  wallet-address: ${KMS_WALLET_ADDRESS:}  # derived from KMS if blank
+  wallet-address: ${KMS_WALLET_ADDRESS:}
 
-  # Client's permissioned DLT
   dlt:
     rpc-endpoint: ${DLT_RPC_ENDPOINT}
     chain-id: ${DLT_CHAIN_ID:1337}
     explorer-url: ${DLT_EXPLORER_URL:}
-    gas-limit: ${DLT_GAS_LIMIT:300000}
+    gas-limit: ${DLT_GAS_LIMIT:10000000}
     max-fee-per-gas: ${DLT_MAX_FEE_PER_GAS:0}
     max-priority-fee-per-gas: ${DLT_MAX_PRIORITY_FEE_PER_GAS:0}
     gas-fund-amount-eth: ${DLT_GAS_FUND_AMOUNT_ETH:0.001}
 
-  # SQS queue names (must match the queues created in the client's AWS account)
+  # SNS FIFO topic — kms-integration publishes responses here
+  sns:
+    topic-arn: ${SNS_TOPIC_ARN}
+
+  # SQS FIFO queue — kms-integration reads requests from here (subscribed to client SNS)
   sqs:
-    token-creation-request:  ${SQS_TOKEN_CREATION_REQUEST:kms-token-creation-request}
-    token-creation-response: ${SQS_TOKEN_CREATION_RESPONSE:kms-token-creation-response}
-    balance-request:         ${SQS_BALANCE_REQUEST:kms-balance-request}
-    balance-response:        ${SQS_BALANCE_RESPONSE:kms-balance-response}
-    token-event-request:     ${SQS_TOKEN_EVENT_REQUEST:kms-token-event-request}
-    token-event-response:    ${SQS_TOKEN_EVENT_RESPONSE:kms-token-event-response}
-    token-transfer-request:  ${SQS_TOKEN_TRANSFER_REQUEST:kms-token-transfer-request}
-    token-transfer-response: ${SQS_TOKEN_TRANSFER_RESPONSE:kms-token-transfer-response}
-    account-create-request:  ${SQS_ACCOUNT_CREATE_REQUEST:kms-account-create-request}
-    account-create-response: ${SQS_ACCOUNT_CREATE_RESPONSE:kms-account-create-response}
-    user-transfer-request:   ${SQS_USER_TRANSFER_REQUEST:kms-user-transfer-request}
-    user-transfer-response:  ${SQS_USER_TRANSFER_RESPONSE:kms-user-transfer-response}
+    queue-name: ${SQS_QUEUE_NAME:atoken-integracao-kms-sqs-dev.fifo}

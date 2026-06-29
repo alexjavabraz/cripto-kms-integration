@@ -1,15 +1,12 @@
 package net.tokeniza.kms.consumer;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.awspring.cloud.sqs.annotation.SqsListener;
-import io.awspring.cloud.sqs.operations.SqsTemplate;
 import io.sentry.Sentry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import net.tokeniza.kms.config.AppProperties;
 import net.tokeniza.kms.dto.BalanceRequestDto;
 import net.tokeniza.kms.service.BalanceService;
-import org.springframework.messaging.Message;
+import net.tokeniza.kms.service.SnsPublisher;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
@@ -24,29 +21,29 @@ public class BalanceConsumer {
     private static final String PROCESSED_BY = "kms-integration";
 
     private final BalanceService balanceService;
-    private final SqsTemplate sqsTemplate;
-    private final AppProperties props;
+    private final SnsPublisher snsPublisher;
     private final ObjectMapper objectMapper;
 
-    @SqsListener("${kms.sqs.balance-request}")
-    public void onMessage(Message<String> message) {
+    void handle(String body) {
         long startMs = System.currentTimeMillis();
         BalanceRequestDto req = null;
         try {
-            req = objectMapper.readValue(message.getPayload(), BalanceRequestDto.class);
+            req = objectMapper.readValue(body, BalanceRequestDto.class);
             log.info("Balance query: idempotencyKey={} contract={} wallet={}",
                     req.getIdempotencyKey(), req.getToken().getAddress(), req.getWallet().getAddress());
 
             BalanceService.BalanceResult balance = balanceService.getErc20Balance(
                     req.getToken().getAddress(), req.getWallet().getAddress());
 
-            send(props.getSqs().getBalanceResponse(), successPayload(req, balance, System.currentTimeMillis() - startMs));
+            snsPublisher.publish(req.getIdempotencyKey(),
+                    successPayload(req, balance, System.currentTimeMillis() - startMs));
 
         } catch (Exception e) {
             log.error("Balance query failed: {}", e.getMessage(), e);
             Sentry.captureException(e);
             if (req != null) {
-                send(props.getSqs().getBalanceResponse(), errorPayload(req, e.getMessage(), System.currentTimeMillis() - startMs));
+                snsPublisher.publish(req.getIdempotencyKey(),
+                        errorPayload(req, e.getMessage(), System.currentTimeMillis() - startMs));
             }
         }
     }
@@ -80,9 +77,5 @@ public class BalanceConsumer {
     private Map<String, Object> metadata(String correlationId, long durationMs) {
         return Map.of("correlationId", correlationId != null ? correlationId : "",
                       "processedBy", PROCESSED_BY, "durationMs", durationMs);
-    }
-
-    private void send(String queue, Object payload) {
-        sqsTemplate.send(to -> to.queue(queue).payload(payload));
     }
 }

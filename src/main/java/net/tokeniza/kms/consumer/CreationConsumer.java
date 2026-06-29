@@ -1,15 +1,13 @@
 package net.tokeniza.kms.consumer;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.awspring.cloud.sqs.annotation.SqsListener;
-import io.awspring.cloud.sqs.operations.SqsTemplate;
 import io.sentry.Sentry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.tokeniza.kms.config.AppProperties;
 import net.tokeniza.kms.dto.CreationRequestDto;
 import net.tokeniza.kms.kms.KmsSigner;
-import org.springframework.messaging.Message;
+import net.tokeniza.kms.service.SnsPublisher;
 import org.springframework.stereotype.Component;
 import org.web3j.crypto.Hash;
 import org.web3j.crypto.RawTransaction;
@@ -38,22 +36,21 @@ public class CreationConsumer {
 
     private final Web3j web3j;
     private final KmsSigner platformSigner;
-    private final SqsTemplate sqsTemplate;
+    private final SnsPublisher snsPublisher;
     private final AppProperties props;
     private final ObjectMapper objectMapper;
 
     private final ConcurrentHashMap<String, Boolean> processedKeys = new ConcurrentHashMap<>();
 
-    @SqsListener("${kms.sqs.token-creation-request}")
-    public void onMessage(Message<String> message) {
+    void handle(String body) {
         long startMs = System.currentTimeMillis();
         CreationRequestDto req = null;
         try {
-            req = objectMapper.readValue(message.getPayload(), CreationRequestDto.class);
+            req = objectMapper.readValue(body, CreationRequestDto.class);
 
             if (processedKeys.putIfAbsent(req.getIdempotencyKey(), true) != null) {
                 log.warn("Duplicate creation request: {}", req.getIdempotencyKey());
-                send(props.getSqs().getTokenCreationResponse(),
+                snsPublisher.publish(req.getIdempotencyKey(),
                         errorPayload(req, "DUPLICATE_REQUEST",
                                 "Idempotency key already processed: " + req.getIdempotencyKey(),
                                 System.currentTimeMillis() - startMs));
@@ -68,14 +65,14 @@ public class CreationConsumer {
             TransactionReceipt receipt = waitForReceipt(txHash);
 
             log.info("Token deployed: contract={} txHash={}", receipt.getContractAddress(), txHash);
-            send(props.getSqs().getTokenCreationResponse(),
+            snsPublisher.publish(req.getIdempotencyKey(),
                     successPayload(req, receipt.getContractAddress(), txHash, receipt, System.currentTimeMillis() - startMs));
 
         } catch (Exception e) {
             log.error("Token creation failed: {}", e.getMessage(), e);
             Sentry.captureException(e);
             if (req != null) {
-                send(props.getSqs().getTokenCreationResponse(),
+                snsPublisher.publish(req.getIdempotencyKey(),
                         errorPayload(req, "DEPLOYMENT_FAILED", e.getMessage(), System.currentTimeMillis() - startMs));
             }
         }
@@ -216,9 +213,5 @@ public class CreationConsumer {
         r.put("metadata", Map.of("correlationId", req.getMetadata() != null ? req.getMetadata().getCorrelationId() : "",
                 "processedBy", PROCESSED_BY, "durationMs", durationMs));
         return r;
-    }
-
-    private void send(String queue, Object payload) {
-        sqsTemplate.send(to -> to.queue(queue).payload(payload));
     }
 }

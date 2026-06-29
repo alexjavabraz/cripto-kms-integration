@@ -9,10 +9,6 @@ import org.springframework.stereotype.Component;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Validates required configuration at startup and fails fast with a clear error
- * rather than allowing the application to start in a broken state.
- */
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -36,6 +32,12 @@ public class StartupValidator implements ApplicationRunner {
         if (props.getDlt().getGasLimit() <= 0) {
             errors.add("DLT_GAS_LIMIT (kms.dlt.gas-limit) — must be a positive integer");
         }
+        if (blank(props.getSns().getTopicArn())) {
+            errors.add("SNS_TOPIC_ARN (kms.sns.topic-arn) — FIFO SNS topic ARN for publishing responses is required");
+        }
+        if (blank(props.getSqs().getQueueName())) {
+            errors.add("SQS_QUEUE_NAME (kms.sqs.queue-name) — FIFO SQS queue name for reading requests is required");
+        }
 
         if (!errors.isEmpty()) {
             String msg = "Startup validation failed — missing or invalid configuration:\n  - "
@@ -44,8 +46,9 @@ public class StartupValidator implements ApplicationRunner {
             throw new IllegalStateException(msg);
         }
 
-        log.info("Startup validation passed — region={} chainId={} rpc={}",
-                props.getRegion(), props.getDlt().getChainId(), props.getDlt().getRpcEndpoint());
+        log.info("Startup validation passed — region={} chainId={} rpc={} sqs={} sns={}",
+                props.getRegion(), props.getDlt().getChainId(), props.getDlt().getRpcEndpoint(),
+                props.getSqs().getQueueName(), props.getSns().getTopicArn());
     }
 
     private static boolean blank(String s) {

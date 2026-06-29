@@ -15,11 +15,12 @@
     <artifactId>kms-integration</artifactId>
     <version>1.0.0</version>
     <name>kms-integration</name>
-    <description>Blockchain signing service — AWS KMS + ERC-20 operations via RabbitMQ</description>
+    <description>Blockchain signing service — AWS KMS + ERC-20 operations via SQS</description>
 
     <properties>
         <java.version>21</java.version>
         <aws-sdk.version>2.25.70</aws-sdk.version>
+        <spring-cloud-aws.version>3.2.1</spring-cloud-aws.version>
         <web3j.version>4.12.0</web3j.version>
         <sentry.version>7.14.0</sentry.version>
     </properties>
@@ -33,6 +34,13 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
+            <dependency>
+                <groupId>io.awspring.cloud</groupId>
+                <artifactId>spring-cloud-aws-dependencies</artifactId>
+                <version>${spring-cloud-aws.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
         </dependencies>
     </dependencyManagement>
 
@@ -40,15 +48,21 @@
         <!-- Spring Boot -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-amqp</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+
+        <!-- Spring Cloud AWS — SQS + SNS -->
+        <dependency>
+            <groupId>io.awspring.cloud</groupId>
+            <artifactId>spring-cloud-aws-starter-sqs</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.awspring.cloud</groupId>
+            <artifactId>spring-cloud-aws-starter-sns</artifactId>
         </dependency>
 
         <!-- AWS KMS SDK v2 -->
@@ -71,7 +85,7 @@
             <version>1.78.1</version>
         </dependency>
 
-        <!-- Jackson — JSON (included via spring-boot-starter-amqp) -->
+        <!-- Jackson -->
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
@@ -98,8 +112,8 @@
             <scope>test</scope>
         </dependency>
         <dependency>
-            <groupId>org.springframework.amqp</groupId>
-            <artifactId>spring-rabbit-test</artifactId>
+            <groupId>io.awspring.cloud</groupId>
+            <artifactId>spring-cloud-aws-test</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>

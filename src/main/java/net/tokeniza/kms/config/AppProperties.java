@@ -14,6 +14,7 @@ public class AppProperties {
     private String walletAddress = "";
 
     private Dlt dlt = new Dlt();
+    private Sns sns = new Sns();
     private Sqs sqs = new Sqs();
 
     @Data
@@ -21,25 +22,21 @@ public class AppProperties {
         private String rpcEndpoint;
         private long chainId = 1337;
         private String explorerUrl = "";
-        private long gasLimit = 300_000;
+        private long gasLimit = 10_000_000;
         private long maxFeePerGas = 0;
         private long maxPriorityFeePerGas = 0;
         private String gasFundAmountEth = "0.001";
     }
 
     @Data
+    public static class Sns {
+        /** ARN of the FIFO SNS topic kms-integration publishes responses to. */
+        private String topicArn;
+    }
+
+    @Data
     public static class Sqs {
-        private String tokenCreationRequest  = "kms-token-creation-request";
-        private String tokenCreationResponse = "kms-token-creation-response";
-        private String balanceRequest        = "kms-balance-request";
-        private String balanceResponse       = "kms-balance-response";
-        private String tokenEventRequest     = "kms-token-event-request";
-        private String tokenEventResponse    = "kms-token-event-response";
-        private String tokenTransferRequest  = "kms-token-transfer-request";
-        private String tokenTransferResponse = "kms-token-transfer-response";
-        private String accountCreateRequest  = "kms-account-create-request";
-        private String accountCreateResponse = "kms-account-create-response";
-        private String userTransferRequest   = "kms-user-transfer-request";
-        private String userTransferResponse  = "kms-user-transfer-response";
+        /** Name of the FIFO SQS queue kms-integration reads requests from. */
+        private String queueName = "atoken-integracao-kms-sqs-dev.fifo";
     }
 }
