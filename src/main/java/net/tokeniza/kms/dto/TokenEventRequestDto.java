@@ -27,7 +27,7 @@ public class TokenEventRequestDto {
 
     @Data @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Operation {
-        private String type;    // mint | burn | pause | unpause
+        private String type;    // mint | burn | transfer | pause | unpause
         private String toAddress;
         private String fromAddress;
         private String amount;

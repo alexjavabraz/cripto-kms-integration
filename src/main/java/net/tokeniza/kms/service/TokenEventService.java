@@ -49,7 +49,8 @@ public class TokenEventService {
         String encodedFunction = switch (operationType.toLowerCase()) {
             case "mint" -> encodeMint(req.getOperation().getToAddress(),
                     req.getOperation().getAmount(), decimals);
-            case "burn" -> encodeBurn(req.getOperation().getFromAddress(),
+            case "burn" -> encodeBurn(req.getOperation().getAmount(), decimals);
+            case "transfer" -> encodeTransfer(req.getOperation().getToAddress(),
                     req.getOperation().getAmount(), decimals);
             case "pause"   -> encodeNoArg("pause");
             case "unpause" -> encodeNoArg("unpause");
@@ -72,10 +73,19 @@ public class TokenEventService {
                 List.of(new TypeReference<Bool>() {})));
     }
 
-    private String encodeBurn(String from, String amount, int decimals) {
+    // burn(uint256) — OZ ERC20Burnable: queima da carteira da plataforma (msg.sender)
+    private String encodeBurn(String amount, int decimals) {
         BigInteger amountWei = new BigDecimal(amount).multiply(BigDecimal.TEN.pow(decimals)).toBigInteger();
         return FunctionEncoder.encode(new Function("burn",
-                Arrays.asList(new Address(from), new Uint256(amountWei)),
+                List.of(new Uint256(amountWei)),
+                List.of(new TypeReference<Bool>() {})));
+    }
+
+    // transfer(address,uint256) — ERC20 padrão
+    private String encodeTransfer(String to, String amount, int decimals) {
+        BigInteger amountWei = new BigDecimal(amount).multiply(BigDecimal.TEN.pow(decimals)).toBigInteger();
+        return FunctionEncoder.encode(new Function("transfer",
+                Arrays.asList(new Address(to), new Uint256(amountWei)),
                 List.of(new TypeReference<Bool>() {})));
     }
 

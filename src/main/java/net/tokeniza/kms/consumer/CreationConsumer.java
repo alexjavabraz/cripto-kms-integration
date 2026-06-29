@@ -90,48 +90,91 @@ public class CreationConsumer {
     }
 
     private String appendConstructorArgs(String bytecode, CreationRequestDto req) {
+        CreationRequestDto.Erc20Params erc20 = req.getParams() != null ? req.getParams().getErc20() : null;
+        CreationRequestDto.Erc721Params erc721 = req.getParams() != null ? req.getParams().getErc721() : null;
+        CreationRequestDto.Erc1155Params erc1155 = req.getParams() != null ? req.getParams().getErc1155() : null;
+
         return switch (req.getToken().getStandard().toUpperCase()) {
+            // Constructor: (string name, string symbol, uint8 decimals, uint256 initialSupply, address owner)
             case "ERC20" -> bytecode + encodeErc20Constructor(
-                    req.getToken().getName(), req.getToken().getSymbol(),
-                    req.getParams() != null && req.getParams().getErc20() != null
-                            ? req.getParams().getErc20().getDecimals() : 18,
+                    req.getToken().getName(),
+                    req.getToken().getSymbol(),
+                    erc20 != null ? erc20.getDecimals() : 18,
+                    erc20 != null && erc20.getSupply() != null ? erc20.getSupply() : "0",
                     req.getToken().getOwnerAddress());
+            // Constructor: (string name, string symbol, string baseURI, address owner)
             case "ERC721" -> bytecode + encodeErc721Constructor(
-                    req.getToken().getName(), req.getToken().getSymbol(), req.getToken().getOwnerAddress());
+                    req.getToken().getName(),
+                    req.getToken().getSymbol(),
+                    erc721 != null && erc721.getBaseUri() != null ? erc721.getBaseUri() : "",
+                    req.getToken().getOwnerAddress());
+            // Constructor: (string uri, address owner)
             case "ERC1155" -> bytecode + encodeErc1155Constructor(
-                    req.getParams() != null && req.getParams().getErc1155() != null
-                            ? req.getParams().getErc1155().getUri() : "",
+                    erc1155 != null && erc1155.getUri() != null ? erc1155.getUri() : "",
                     req.getToken().getOwnerAddress());
             default -> throw new IllegalArgumentException("Unsupported standard: " + req.getToken().getStandard());
         };
     }
 
-    private String encodeErc20Constructor(String name, String symbol, int decimals, String owner) {
-        return abiEncodeStrings(name, symbol) + pad32(BigInteger.valueOf(decimals).toString(16))
-                + pad32(owner.toLowerCase().replace("0x", ""));
-    }
+    /**
+     * ABI encodes: (string name, string symbol, uint8 decimals, uint256 initialSupply, address owner)
+     * 5 static slots (headSize = 160), then 2 dynamic strings.
+     */
+    private String encodeErc20Constructor(String name, String symbol, int decimals, String supply, String owner) {
+        byte[] nb = name.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        byte[] sb = symbol.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        int headSize  = 5 * 32;                               // 160
+        int nameOff   = headSize;                             // 160
+        int symbolOff = headSize + 32 + ceil32(nb.length);   // 160 + 32 + ceil32(name)
 
-    private String encodeErc721Constructor(String name, String symbol, String owner) {
-        return abiEncodeStrings(name, symbol) + pad32(owner.toLowerCase().replace("0x", ""));
-    }
-
-    private String encodeErc1155Constructor(String uri, String owner) {
-        byte[] uriBytes = uri.getBytes();
-        return pad32(Integer.toHexString(64))
+        return pad32(Integer.toHexString(nameOff))
+                + pad32(Integer.toHexString(symbolOff))
+                + pad32(Integer.toHexString(decimals))
+                + pad32(new BigInteger(supply).toString(16))
                 + pad32(owner.toLowerCase().replace("0x", ""))
-                + pad32(Integer.toHexString(uriBytes.length))
-                + Numeric.toHexStringNoPrefix(uriBytes)
-                + "0".repeat((32 - uriBytes.length % 32) % 32 * 2);
+                + encodeBytes(nb)
+                + encodeBytes(sb);
     }
 
-    private String abiEncodeStrings(String s1, String s2) {
-        byte[] b1 = s1.getBytes(), b2 = s2.getBytes();
-        return pad32(Integer.toHexString(64))
-                + pad32(Integer.toHexString(64 + 32 + ceil32(b1.length)))
-                + pad32(Integer.toHexString(b1.length))
-                + Numeric.toHexStringNoPrefix(b1) + "0".repeat((32 - b1.length % 32) % 32 * 2)
-                + pad32(Integer.toHexString(b2.length))
-                + Numeric.toHexStringNoPrefix(b2) + "0".repeat((32 - b2.length % 32) % 32 * 2);
+    /**
+     * ABI encodes: (string name, string symbol, string baseURI, address owner)
+     * 4 static slots (headSize = 128), then 3 dynamic strings.
+     */
+    private String encodeErc721Constructor(String name, String symbol, String baseUri, String owner) {
+        byte[] nb  = name.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        byte[] sb  = symbol.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        byte[] ub  = baseUri.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        int headSize   = 4 * 32;                               // 128
+        int nameOff    = headSize;                             // 128
+        int symbolOff  = headSize + 32 + ceil32(nb.length);
+        int baseUriOff = symbolOff + 32 + ceil32(sb.length);
+
+        return pad32(Integer.toHexString(nameOff))
+                + pad32(Integer.toHexString(symbolOff))
+                + pad32(Integer.toHexString(baseUriOff))
+                + pad32(owner.toLowerCase().replace("0x", ""))
+                + encodeBytes(nb)
+                + encodeBytes(sb)
+                + encodeBytes(ub);
+    }
+
+    /**
+     * ABI encodes: (string uri, address owner)
+     * 2 static slots (headSize = 64), then 1 dynamic string.
+     */
+    private String encodeErc1155Constructor(String uri, String owner) {
+        byte[] ub = uri.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        return pad32(Integer.toHexString(64))                      // offset to uri = headSize
+                + pad32(owner.toLowerCase().replace("0x", ""))     // owner (static)
+                + encodeBytes(ub);
+    }
+
+    /** Encodes a byte array as ABI dynamic type: length (32 bytes) + data (padded to 32). */
+    private static String encodeBytes(byte[] data) {
+        if (data.length == 0) return pad32("0") + pad32("0");
+        String content = Numeric.toHexStringNoPrefix(data);
+        int padding = (32 - data.length % 32) % 32;
+        return pad32(Integer.toHexString(data.length)) + content + "00".repeat(padding);
     }
 
     private static int ceil32(int n) { return n == 0 ? 32 : ((n + 31) / 32) * 32; }
@@ -145,9 +188,10 @@ public class CreationConsumer {
         BigInteger nonce = web3j.ethGetTransactionCount(from, DefaultBlockParameterName.PENDING)
                 .send().getTransactionCount();
 
-        RawTransaction rawTx = RawTransaction.createContractTransaction(
+        // EIP-1559 contract deployment: to="" signals contract creation in the EVM
+        RawTransaction rawTx = RawTransaction.createTransaction(
                 dlt.getChainId(), nonce, BigInteger.valueOf(dlt.getGasLimit()),
-                BigInteger.ZERO, bytecode,
+                "", BigInteger.ZERO, bytecode,
                 BigInteger.valueOf(dlt.getMaxPriorityFeePerGas()),
                 BigInteger.valueOf(dlt.getMaxFeePerGas())
         );
