@@ -5,7 +5,8 @@ import io.sentry.Sentry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.tokeniza.kms.dto.UserTransferRequestDto;
-import net.tokeniza.kms.service.SnsPublisher;
+import net.tokeniza.kms.persistence.RequestLogService;
+import net.tokeniza.kms.service.ResponsePublisher;
 import net.tokeniza.kms.service.TokenTransferService;
 import org.springframework.stereotype.Component;
 
@@ -21,7 +22,8 @@ public class UserTransferConsumer {
     private static final String PROCESSED_BY = "kms-integration";
 
     private final TokenTransferService transferService;
-    private final SnsPublisher snsPublisher;
+    private final ResponsePublisher responsePublisher;
+    private final RequestLogService requestLogService;
     private final ObjectMapper objectMapper;
 
     void handle(String body) {
@@ -29,6 +31,8 @@ public class UserTransferConsumer {
         UserTransferRequestDto req = null;
         try {
             req = objectMapper.readValue(body, UserTransferRequestDto.class);
+            requestLogService.logReceived(req.getRequestId(), "USER_TRANSFER", req.getResponseQueue(), body);
+
             log.info("User transfer: requestId={} userId={} to={} amount={}",
                     req.getRequestId(), req.getUserId(), req.getToAddress(), req.getAmount());
 
@@ -40,16 +44,18 @@ public class UserTransferConsumer {
                     req.getDecimals()
             );
 
-            snsPublisher.publish(req.getRequestId(),
-                    successPayload(req, result, System.currentTimeMillis() - startMs));
+            Map<String, Object> okPayload = successPayload(req, result, System.currentTimeMillis() - startMs);
+            responsePublisher.publish(req.getResponseQueue(), req.getRequestId(), okPayload);
+            requestLogService.markCompleted(req.getRequestId(), okPayload);
             log.info("User transfer succeeded: requestId={} txHash={}", req.getRequestId(), result.txHash());
 
         } catch (Exception e) {
             log.error("User transfer failed: requestId={} error={}", req != null ? req.getRequestId() : "?", e.getMessage(), e);
             Sentry.captureException(e);
             if (req != null) {
-                snsPublisher.publish(req.getRequestId(),
-                        errorPayload(req, e.getMessage(), System.currentTimeMillis() - startMs));
+                Map<String, Object> errPayload = errorPayload(req, e.getMessage(), System.currentTimeMillis() - startMs);
+                responsePublisher.publish(req.getResponseQueue(), req.getRequestId(), errPayload);
+                requestLogService.markFailed(req.getRequestId(), e.getMessage());
             }
         }
     }

@@ -5,7 +5,7 @@ import lombok.Data;
 
 @Data
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class BalanceRequestDto {
+public class BalanceRequestDto extends BaseRequestDto {
     private String idempotencyKey;
     private Network network;
     private Token token;

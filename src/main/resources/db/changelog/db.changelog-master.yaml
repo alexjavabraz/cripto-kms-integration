@@ -1,0 +1,4 @@
+databaseChangeLog:
+  - include:
+      file: db/changelog/migrations/001_create_request_log.sql
+      relativeToChangelogFile: false

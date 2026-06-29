@@ -25,7 +25,7 @@ public class AccountService {
         log.info("Creating KMS wallet for userId={}", userId);
 
         CreateKeyResponse createResponse = kmsClient.createKey(CreateKeyRequest.builder()
-                .keySpec(KeySpec.ECC_SECG_P256K1)
+                .keySpec(KeySpec.ECC_SECG_P256_K1)
                 .keyUsage(KeyUsageType.SIGN_VERIFY)
                 .description("Tokeniza user wallet — userId=" + userId)
                 .build());

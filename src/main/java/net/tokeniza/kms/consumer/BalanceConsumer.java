@@ -5,8 +5,9 @@ import io.sentry.Sentry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.tokeniza.kms.dto.BalanceRequestDto;
+import net.tokeniza.kms.persistence.RequestLogService;
 import net.tokeniza.kms.service.BalanceService;
-import net.tokeniza.kms.service.SnsPublisher;
+import net.tokeniza.kms.service.ResponsePublisher;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
@@ -21,7 +22,8 @@ public class BalanceConsumer {
     private static final String PROCESSED_BY = "kms-integration";
 
     private final BalanceService balanceService;
-    private final SnsPublisher snsPublisher;
+    private final ResponsePublisher responsePublisher;
+    private final RequestLogService requestLogService;
     private final ObjectMapper objectMapper;
 
     void handle(String body) {
@@ -29,21 +31,25 @@ public class BalanceConsumer {
         BalanceRequestDto req = null;
         try {
             req = objectMapper.readValue(body, BalanceRequestDto.class);
+            requestLogService.logReceived(req.getIdempotencyKey(), "BALANCE_QUERY", req.getResponseQueue(), body);
+
             log.info("Balance query: idempotencyKey={} contract={} wallet={}",
                     req.getIdempotencyKey(), req.getToken().getAddress(), req.getWallet().getAddress());
 
             BalanceService.BalanceResult balance = balanceService.getErc20Balance(
                     req.getToken().getAddress(), req.getWallet().getAddress());
 
-            snsPublisher.publish(req.getIdempotencyKey(),
-                    successPayload(req, balance, System.currentTimeMillis() - startMs));
+            Map<String, Object> okPayload = successPayload(req, balance, System.currentTimeMillis() - startMs);
+            responsePublisher.publish(req.getResponseQueue(), req.getIdempotencyKey(), okPayload);
+            requestLogService.markCompleted(req.getIdempotencyKey(), okPayload);
 
         } catch (Exception e) {
             log.error("Balance query failed: {}", e.getMessage(), e);
             Sentry.captureException(e);
             if (req != null) {
-                snsPublisher.publish(req.getIdempotencyKey(),
-                        errorPayload(req, e.getMessage(), System.currentTimeMillis() - startMs));
+                Map<String, Object> errPayload = errorPayload(req, e.getMessage(), System.currentTimeMillis() - startMs);
+                responsePublisher.publish(req.getResponseQueue(), req.getIdempotencyKey(), errPayload);
+                requestLogService.markFailed(req.getIdempotencyKey(), e.getMessage());
             }
         }
     }

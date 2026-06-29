@@ -6,6 +6,32 @@ spring:
     serialization:
       write-dates-as-timestamps: false
 
+  # AWS Secrets Manager — loads DB credentials when running in AWS
+  # Secret must be a flat JSON: {"DB_HOST":"...","DB_USERNAME":"...","DB_PASSWORD":"...","DB_LIQUIBASE_PASSWORD":"..."}
+  config:
+    import: "optional:aws-secretsmanager:/kms-integration/rds-credentials"
+
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:192.168.15.5}:${DB_PORT:5432}/${DB_NAME:kms_db}
+    username: ${DB_USERNAME:kms_app}
+    password: ${DB_PASSWORD:}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: false
+
+  liquibase:
+    change-log: classpath:db/changelog/db.changelog-master.yaml
+    user: ${DB_LIQUIBASE_USER:dpl_devops_liquibase}
+    password: ${DB_LIQUIBASE_PASSWORD:}
+    enabled: true
+
   cloud:
     aws:
       region:
@@ -16,6 +42,8 @@ spring:
         endpoint: ${AWS_SQS_ENDPOINT:}
       sns:
         endpoint: ${AWS_SNS_ENDPOINT:}
+      secretsmanager:
+        endpoint: ${AWS_SECRETSMANAGER_ENDPOINT:}
 
 management:
   endpoints:
@@ -44,6 +72,10 @@ kms:
     max-fee-per-gas: ${DLT_MAX_FEE_PER_GAS:0}
     max-priority-fee-per-gas: ${DLT_MAX_PRIORITY_FEE_PER_GAS:0}
     gas-fund-amount-eth: ${DLT_GAS_FUND_AMOUNT_ETH:0.001}
+    bytecode:
+      ERC20:   ${BYTECODE_ERC20:}
+      ERC721:  ${BYTECODE_ERC721:}
+      ERC1155: ${BYTECODE_ERC1155:}
 
   # SNS FIFO topic — kms-integration publishes responses here
   sns:

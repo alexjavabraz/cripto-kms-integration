@@ -73,7 +73,7 @@ class KmsSignerTest {
 
         assertThat(result.getR()).hasSize(32);
         assertThat(result.getS()).hasSize(32);
-        assertThat(result.getV()[0]).isIn((byte) 0, (byte) 1);
+        assertThat(result.getV()[0]).isIn((byte) 27, (byte) 28);
     }
 
     @Test
@@ -90,7 +90,7 @@ class KmsSignerTest {
 
         // verify the recovered address matches the expected key
         BigInteger recovered = Sign.recoverFromSignature(
-                result.getV()[0],
+                result.getV()[0] - 27,
                 new org.web3j.crypto.ECDSASignature(
                         new BigInteger(1, result.getR()),
                         new BigInteger(1, result.getS())),
@@ -129,6 +129,7 @@ class KmsSignerTest {
         BigInteger resultS = new BigInteger(1, result.getS());
         BigInteger halfN = N.divide(BigInteger.TWO);
         assertThat(resultS).isLessThanOrEqualTo(halfN);
+        assertThat(result.getV()[0]).isIn((byte) 27, (byte) 28);
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────

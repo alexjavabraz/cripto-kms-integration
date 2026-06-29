@@ -1,6 +1,6 @@
 package net.tokeniza.kms.service;
 
-import net.tokeniza.kms.kms.KmsSignerTest;
+import net.tokeniza.kms.TestCryptoUtils;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -31,7 +31,7 @@ class AccountServiceTest {
         String keyId = "arn:aws:kms:us-east-1:123456789:key/abc-123";
 
         var keyPair = Keys.createEcKeyPair();
-        byte[] publicKeyDer = KmsSignerTest.buildPublicKeyDer(keyPair.getPublicKey());
+        byte[] publicKeyDer = TestCryptoUtils.buildPublicKeyDer(keyPair.getPublicKey());
         String expectedAddress = "0x" + Keys.getAddress(keyPair);
 
         when(kmsClient.createKey(any(CreateKeyRequest.class)))
@@ -42,7 +42,7 @@ class AccountServiceTest {
                 .thenReturn(GetPublicKeyResponse.builder()
                         .publicKey(SdkBytes.fromByteArray(publicKeyDer))
                         .build());
-        doNothing().when(kmsClient).createAlias(any(CreateAliasRequest.class));
+        when(kmsClient.createAlias(any(CreateAliasRequest.class))).thenReturn(CreateAliasResponse.builder().build());
 
         AccountService.WalletResult result = accountService.createWallet(userId);
 
@@ -62,15 +62,15 @@ class AccountServiceTest {
                         .build());
         when(kmsClient.getPublicKey(any(GetPublicKeyRequest.class)))
                 .thenReturn(GetPublicKeyResponse.builder()
-                        .publicKey(SdkBytes.fromByteArray(KmsSignerTest.buildPublicKeyDer(keyPair.getPublicKey())))
+                        .publicKey(SdkBytes.fromByteArray(TestCryptoUtils.buildPublicKeyDer(keyPair.getPublicKey())))
                         .build());
-        doNothing().when(kmsClient).createAlias(any(CreateAliasRequest.class));
+        when(kmsClient.createAlias(any(CreateAliasRequest.class))).thenReturn(CreateAliasResponse.builder().build());
 
         accountService.createWallet(userId);
 
         ArgumentCaptor<CreateKeyRequest> captor = ArgumentCaptor.forClass(CreateKeyRequest.class);
         verify(kmsClient).createKey(captor.capture());
-        assertThat(captor.getValue().keySpec()).isEqualTo(KeySpec.ECC_SECG_P256K1);
+        assertThat(captor.getValue().keySpec()).isEqualTo(KeySpec.ECC_SECG_P256_K1);
         assertThat(captor.getValue().keyUsage()).isEqualTo(KeyUsageType.SIGN_VERIFY);
     }
 
@@ -85,9 +85,9 @@ class AccountServiceTest {
                         .build());
         when(kmsClient.getPublicKey(any(GetPublicKeyRequest.class)))
                 .thenReturn(GetPublicKeyResponse.builder()
-                        .publicKey(SdkBytes.fromByteArray(KmsSignerTest.buildPublicKeyDer(keyPair.getPublicKey())))
+                        .publicKey(SdkBytes.fromByteArray(TestCryptoUtils.buildPublicKeyDer(keyPair.getPublicKey())))
                         .build());
-        doNothing().when(kmsClient).createAlias(any(CreateAliasRequest.class));
+        when(kmsClient.createAlias(any(CreateAliasRequest.class))).thenReturn(CreateAliasResponse.builder().build());
 
         accountService.createWallet(userId);
 
@@ -108,7 +108,7 @@ class AccountServiceTest {
                         .build());
         when(kmsClient.getPublicKey(any(GetPublicKeyRequest.class)))
                 .thenReturn(GetPublicKeyResponse.builder()
-                        .publicKey(SdkBytes.fromByteArray(KmsSignerTest.buildPublicKeyDer(keyPair.getPublicKey())))
+                        .publicKey(SdkBytes.fromByteArray(TestCryptoUtils.buildPublicKeyDer(keyPair.getPublicKey())))
                         .build());
         when(kmsClient.createAlias(any(CreateAliasRequest.class)))
                 .thenThrow(AlreadyExistsException.builder().message("alias exists").build());

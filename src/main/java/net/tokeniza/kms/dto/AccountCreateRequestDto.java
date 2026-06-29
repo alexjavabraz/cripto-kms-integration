@@ -5,7 +5,7 @@ import lombok.Data;
 
 @Data
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class AccountCreateRequestDto {
+public class AccountCreateRequestDto extends BaseRequestDto {
     private String event;
     private String idempotencyKey;
     private String userId;

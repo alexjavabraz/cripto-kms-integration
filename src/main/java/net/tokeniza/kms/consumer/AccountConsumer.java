@@ -5,9 +5,10 @@ import io.sentry.Sentry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.tokeniza.kms.dto.AccountCreateRequestDto;
+import net.tokeniza.kms.persistence.RequestLogService;
 import net.tokeniza.kms.service.AccountService;
 import net.tokeniza.kms.service.GasFundService;
-import net.tokeniza.kms.service.SnsPublisher;
+import net.tokeniza.kms.service.ResponsePublisher;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
@@ -23,7 +24,8 @@ public class AccountConsumer {
 
     private final AccountService accountService;
     private final GasFundService gasFundService;
-    private final SnsPublisher snsPublisher;
+    private final ResponsePublisher responsePublisher;
+    private final RequestLogService requestLogService;
     private final ObjectMapper objectMapper;
 
     void handle(String body) {
@@ -31,22 +33,26 @@ public class AccountConsumer {
         AccountCreateRequestDto req = null;
         try {
             req = objectMapper.readValue(body, AccountCreateRequestDto.class);
+            requestLogService.logReceived(req.getIdempotencyKey(), "ACCOUNT_CREATE", req.getResponseQueue(), body);
+
             log.info("Account create: idempotencyKey={} userId={} network={}",
                     req.getIdempotencyKey(), req.getUserId(), req.getNetwork());
 
             AccountService.WalletResult wallet = accountService.createWallet(req.getUserId());
             gasFundService.fundAsync(wallet.address());
 
-            snsPublisher.publish(req.getIdempotencyKey(),
-                    successPayload(req, wallet, System.currentTimeMillis() - startMs));
+            Map<String, Object> okPayload = successPayload(req, wallet, System.currentTimeMillis() - startMs);
+            responsePublisher.publish(req.getResponseQueue(), req.getIdempotencyKey(), okPayload);
+            requestLogService.markCompleted(req.getIdempotencyKey(), okPayload);
             log.info("Account created: keyId={} address={}", wallet.keyId(), wallet.address());
 
         } catch (Exception e) {
             log.error("Account create failed: {}", e.getMessage(), e);
             Sentry.captureException(e);
             if (req != null) {
-                snsPublisher.publish(req.getIdempotencyKey(),
-                        errorPayload(req, e.getMessage(), System.currentTimeMillis() - startMs));
+                Map<String, Object> errPayload = errorPayload(req, e.getMessage(), System.currentTimeMillis() - startMs);
+                responsePublisher.publish(req.getResponseQueue(), req.getIdempotencyKey(), errPayload);
+                requestLogService.markFailed(req.getIdempotencyKey(), e.getMessage());
             }
         }
     }

@@ -26,6 +26,8 @@ public class AppProperties {
         private long maxFeePerGas = 0;
         private long maxPriorityFeePerGas = 0;
         private String gasFundAmountEth = "0.001";
+        /** Compiled contract bytecode — keyed by standard name in uppercase (ERC20, ERC721, ERC1155). */
+        private java.util.Map<String, String> bytecode = new java.util.HashMap<>();
     }
 
     @Data

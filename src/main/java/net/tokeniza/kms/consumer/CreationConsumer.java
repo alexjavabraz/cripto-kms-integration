@@ -7,7 +7,8 @@ import lombok.extern.slf4j.Slf4j;
 import net.tokeniza.kms.config.AppProperties;
 import net.tokeniza.kms.dto.CreationRequestDto;
 import net.tokeniza.kms.kms.KmsSigner;
-import net.tokeniza.kms.service.SnsPublisher;
+import net.tokeniza.kms.persistence.RequestLogService;
+import net.tokeniza.kms.service.ResponsePublisher;
 import org.springframework.stereotype.Component;
 import org.web3j.crypto.Hash;
 import org.web3j.crypto.RawTransaction;
@@ -36,7 +37,8 @@ public class CreationConsumer {
 
     private final Web3j web3j;
     private final KmsSigner platformSigner;
-    private final SnsPublisher snsPublisher;
+    private final ResponsePublisher responsePublisher;
+    private final RequestLogService requestLogService;
     private final AppProperties props;
     private final ObjectMapper objectMapper;
 
@@ -47,13 +49,15 @@ public class CreationConsumer {
         CreationRequestDto req = null;
         try {
             req = objectMapper.readValue(body, CreationRequestDto.class);
+            requestLogService.logReceived(req.getIdempotencyKey(), "TOKEN_CREATION", req.getResponseQueue(), body);
 
             if (processedKeys.putIfAbsent(req.getIdempotencyKey(), true) != null) {
                 log.warn("Duplicate creation request: {}", req.getIdempotencyKey());
-                snsPublisher.publish(req.getIdempotencyKey(),
-                        errorPayload(req, "DUPLICATE_REQUEST",
-                                "Idempotency key already processed: " + req.getIdempotencyKey(),
-                                System.currentTimeMillis() - startMs));
+                Map<String, Object> errPayload = errorPayload(req, "DUPLICATE_REQUEST",
+                        "Idempotency key already processed: " + req.getIdempotencyKey(),
+                        System.currentTimeMillis() - startMs);
+                responsePublisher.publish(req.getResponseQueue(), req.getIdempotencyKey(), errPayload);
+                requestLogService.markFailed(req.getIdempotencyKey(), "DUPLICATE_REQUEST");
                 return;
             }
 
@@ -65,15 +69,17 @@ public class CreationConsumer {
             TransactionReceipt receipt = waitForReceipt(txHash);
 
             log.info("Token deployed: contract={} txHash={}", receipt.getContractAddress(), txHash);
-            snsPublisher.publish(req.getIdempotencyKey(),
-                    successPayload(req, receipt.getContractAddress(), txHash, receipt, System.currentTimeMillis() - startMs));
+            Map<String, Object> okPayload = successPayload(req, receipt.getContractAddress(), txHash, receipt, System.currentTimeMillis() - startMs);
+            responsePublisher.publish(req.getResponseQueue(), req.getIdempotencyKey(), okPayload);
+            requestLogService.markCompleted(req.getIdempotencyKey(), okPayload);
 
         } catch (Exception e) {
             log.error("Token creation failed: {}", e.getMessage(), e);
             Sentry.captureException(e);
             if (req != null) {
-                snsPublisher.publish(req.getIdempotencyKey(),
-                        errorPayload(req, "DEPLOYMENT_FAILED", e.getMessage(), System.currentTimeMillis() - startMs));
+                Map<String, Object> errPayload = errorPayload(req, "DEPLOYMENT_FAILED", e.getMessage(), System.currentTimeMillis() - startMs);
+                responsePublisher.publish(req.getResponseQueue(), req.getIdempotencyKey(), errPayload);
+                requestLogService.markFailed(req.getIdempotencyKey(), e.getMessage());
             }
         }
     }
@@ -82,9 +88,10 @@ public class CreationConsumer {
 
     private String resolveConstructorBytecode(CreationRequestDto req) {
         String standard = req.getToken().getStandard().toUpperCase();
-        String bytecode = System.getenv("BYTECODE_" + standard);
+        String bytecode = props.getDlt().getBytecode().get(standard);
         if (bytecode == null || bytecode.isBlank()) {
-            throw new IllegalStateException("Missing env var BYTECODE_" + standard);
+            throw new IllegalStateException("Missing bytecode for standard " + standard
+                    + " — set BYTECODE_" + standard + " env var");
         }
         return appendConstructorArgs(bytecode, req);
     }
@@ -196,7 +203,8 @@ public class CreationConsumer {
                 BigInteger.valueOf(dlt.getMaxFeePerGas())
         );
 
-        byte[] encodedForSigning = TransactionEncoder.encode(rawTx, dlt.getChainId());
+        // EIP-1559: chainId is already in the tx fields — encode without signature for signing hash
+        byte[] encodedForSigning = TransactionEncoder.encode(rawTx);
         Sign.SignatureData sig = platformSigner.sign(Hash.sha3(encodedForSigning));
         byte[] signedTx = TransactionEncoder.encode(rawTx, sig);
 

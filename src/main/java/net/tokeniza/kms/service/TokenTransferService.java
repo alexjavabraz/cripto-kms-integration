@@ -116,8 +116,8 @@ public class TokenTransferService {
                 maxPriorityFeePerGas, maxFeePerGas
         );
 
-        // Hash the EIP-1559 encoded transaction (chainId embedded)
-        byte[] encodedForSigning = TransactionEncoder.encode(rawTx, dlt.getChainId());
+        // EIP-1559: chainId is already in the tx fields — encode without signature for signing hash
+        byte[] encodedForSigning = TransactionEncoder.encode(rawTx);
         byte[] txHash = Hash.sha3(encodedForSigning);
 
         Sign.SignatureData sig = signer.sign(txHash);

@@ -6,7 +6,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.tokeniza.kms.config.AppProperties;
 import net.tokeniza.kms.dto.TokenEventRequestDto;
-import net.tokeniza.kms.service.SnsPublisher;
+import net.tokeniza.kms.persistence.RequestLogService;
+import net.tokeniza.kms.service.ResponsePublisher;
 import net.tokeniza.kms.service.TokenEventService;
 import org.springframework.stereotype.Component;
 
@@ -22,7 +23,8 @@ public class TokenEventConsumer {
     private static final String PROCESSED_BY = "kms-integration";
 
     private final TokenEventService tokenEventService;
-    private final SnsPublisher snsPublisher;
+    private final ResponsePublisher responsePublisher;
+    private final RequestLogService requestLogService;
     private final AppProperties props;
     private final ObjectMapper objectMapper;
 
@@ -31,21 +33,25 @@ public class TokenEventConsumer {
         TokenEventRequestDto req = null;
         try {
             req = objectMapper.readValue(body, TokenEventRequestDto.class);
+            requestLogService.logReceived(req.getIdempotencyKey(), "TOKEN_EVENT", req.getResponseQueue(), body);
+
             log.info("Token event: idempotencyKey={} op={} contract={}",
                     req.getIdempotencyKey(), req.getOperation().getType(), req.getToken().getAddress());
 
             TokenEventService.EventResult result = tokenEventService.executeOperation(req);
 
-            snsPublisher.publish(req.getIdempotencyKey(),
-                    successPayload(req, result, System.currentTimeMillis() - startMs));
+            Map<String, Object> okPayload = successPayload(req, result, System.currentTimeMillis() - startMs);
+            responsePublisher.publish(req.getResponseQueue(), req.getIdempotencyKey(), okPayload);
+            requestLogService.markCompleted(req.getIdempotencyKey(), okPayload);
             log.info("Token event succeeded: op={} txHash={}", req.getOperation().getType(), result.txHash());
 
         } catch (Exception e) {
             log.error("Token event failed: {}", e.getMessage(), e);
             Sentry.captureException(e);
             if (req != null) {
-                snsPublisher.publish(req.getIdempotencyKey(),
-                        errorPayload(req, e.getMessage(), System.currentTimeMillis() - startMs));
+                Map<String, Object> errPayload = errorPayload(req, e.getMessage(), System.currentTimeMillis() - startMs);
+                responsePublisher.publish(req.getResponseQueue(), req.getIdempotencyKey(), errPayload);
+                requestLogService.markFailed(req.getIdempotencyKey(), e.getMessage());
             }
         }
     }

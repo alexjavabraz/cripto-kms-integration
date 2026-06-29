@@ -5,7 +5,8 @@ import io.sentry.Sentry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.tokeniza.kms.dto.TokenTransferRequestDto;
-import net.tokeniza.kms.service.SnsPublisher;
+import net.tokeniza.kms.persistence.RequestLogService;
+import net.tokeniza.kms.service.ResponsePublisher;
 import net.tokeniza.kms.service.TokenTransferService;
 import org.springframework.stereotype.Component;
 
@@ -21,7 +22,8 @@ public class TransferConsumer {
     private static final String PROCESSED_BY = "kms-integration";
 
     private final TokenTransferService transferService;
-    private final SnsPublisher snsPublisher;
+    private final ResponsePublisher responsePublisher;
+    private final RequestLogService requestLogService;
     private final ObjectMapper objectMapper;
 
     void handle(String body) {
@@ -29,6 +31,8 @@ public class TransferConsumer {
         TokenTransferRequestDto req = null;
         try {
             req = objectMapper.readValue(body, TokenTransferRequestDto.class);
+            requestLogService.logReceived(req.getIdempotencyKey(), "TOKEN_TRANSFER", req.getResponseQueue(), body);
+
             log.info("Token transfer: idempotencyKey={} network={} to={} amount={}",
                     req.getIdempotencyKey(), req.getNetwork(),
                     req.getTransfer().getToAddress(), req.getTransfer().getAmount());
@@ -40,16 +44,18 @@ public class TransferConsumer {
                     req.getToken().getDecimals()
             );
 
-            snsPublisher.publish(req.getIdempotencyKey(),
-                    successPayload(req, result, System.currentTimeMillis() - startMs));
+            Map<String, Object> okPayload = successPayload(req, result, System.currentTimeMillis() - startMs);
+            responsePublisher.publish(req.getResponseQueue(), req.getIdempotencyKey(), okPayload);
+            requestLogService.markCompleted(req.getIdempotencyKey(), okPayload);
             log.info("Token transfer succeeded: idempotencyKey={} txHash={}", req.getIdempotencyKey(), result.txHash());
 
         } catch (Exception e) {
             log.error("Token transfer failed: {}", e.getMessage(), e);
             Sentry.captureException(e);
             if (req != null) {
-                snsPublisher.publish(req.getIdempotencyKey(),
-                        errorPayload(req, e.getMessage(), System.currentTimeMillis() - startMs));
+                Map<String, Object> errPayload = errorPayload(req, e.getMessage(), System.currentTimeMillis() - startMs);
+                responsePublisher.publish(req.getResponseQueue(), req.getIdempotencyKey(), errPayload);
+                requestLogService.markFailed(req.getIdempotencyKey(), e.getMessage());
             }
         }
     }

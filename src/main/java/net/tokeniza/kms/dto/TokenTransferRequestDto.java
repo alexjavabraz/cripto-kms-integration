@@ -5,7 +5,7 @@ import lombok.Data;
 
 @Data
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class TokenTransferRequestDto {
+public class TokenTransferRequestDto extends BaseRequestDto {
     private String event;
     private String idempotencyKey;
     private String requestedAt;

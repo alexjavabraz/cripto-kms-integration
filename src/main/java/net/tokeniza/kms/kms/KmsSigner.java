@@ -59,7 +59,8 @@ public class KmsSigner {
 
     /**
      * Signs a 32-byte digest with the KMS key and returns web3j SignatureData (v, r, s).
-     * v is the raw recovery id (0 or 1) — suitable for EIP-1559 type-2 transactions.
+     * v is 27 + recId (27 or 28) — web3j 4.12 TransactionEncoder.encode() expects this
+     * format and internally converts back to recId 0/1 when encoding EIP-1559 transactions.
      */
     public Sign.SignatureData sign(byte[] digest) throws IOException {
         if (digest.length != 32) {
@@ -98,7 +99,7 @@ public class KmsSigner {
                 String recoveredAddr = "0x" + Keys.getAddress(recovered);
                 if (recoveredAddr.equalsIgnoreCase(cachedAddress)) {
                     log.debug("KMS sign: recId={}", recId);
-                    return new Sign.SignatureData((byte) recId, rBytes, sBytes);
+                    return new Sign.SignatureData((byte) (recId + 27), rBytes, sBytes);
                 }
             }
         }

@@ -2,7 +2,7 @@ package net.tokeniza.kms.service;
 
 import net.tokeniza.kms.config.AppProperties;
 import net.tokeniza.kms.kms.KmsSigner;
-import net.tokeniza.kms.kms.KmsSignerTest;
+import net.tokeniza.kms.TestCryptoUtils;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -107,16 +107,19 @@ class TokenTransferServiceTest {
     void executeUserTransfer_usesUserKmsKey() throws Exception {
         String userKeyId = "arn:aws:kms:us-east-1:123:key/user-key";
         String userAddress = "0x" + Keys.getAddress(keyPair);
-        byte[] publicKeyDer = KmsSignerTest.buildPublicKeyDer(keyPair.getPublicKey());
+        byte[] publicKeyDer = TestCryptoUtils.buildPublicKeyDer(keyPair.getPublicKey());
 
         when(kmsClient.getPublicKey(any(GetPublicKeyRequest.class)))
                 .thenReturn(GetPublicKeyResponse.builder().publicKey(SdkBytes.fromByteArray(publicKeyDer)).build());
 
-        Sign.SignatureData webSig = Sign.signMessage(Hash.sha3("dummy".getBytes()), keyPair, false);
-        byte[] der = KmsSignerTest.buildDerSignature(
-                new BigInteger(1, webSig.getR()), new BigInteger(1, webSig.getS()));
-        when(kmsClient.sign(any(SignRequest.class)))
-                .thenReturn(SignResponse.builder().signature(SdkBytes.fromByteArray(der)).build());
+        when(kmsClient.sign(any(SignRequest.class))).thenAnswer(inv -> {
+            SignRequest req = inv.getArgument(0);
+            byte[] digest = req.message().asByteArray();
+            Sign.SignatureData webSig = Sign.signMessage(digest, keyPair, false);
+            byte[] der = TestCryptoUtils.buildDerSignature(
+                    new BigInteger(1, webSig.getR()), new BigInteger(1, webSig.getS()));
+            return SignResponse.builder().signature(SdkBytes.fromByteArray(der)).build();
+        });
 
         mockEthCalls("0xusertx", "0x1");
 
@@ -130,19 +133,19 @@ class TokenTransferServiceTest {
 
     // ── helpers ───────────────────────────────────────────────────────────────
 
-    @SuppressWarnings("unchecked")
+    @SuppressWarnings({"unchecked", "rawtypes"})
     private void mockEthCalls(String txHash, String status) throws Exception {
-        Request<?, EthGetTransactionCount> countReq = mock(Request.class);
+        Request countReq = mock(Request.class);
         EthGetTransactionCount count = new EthGetTransactionCount();
         count.setResult("0x0");
         when(countReq.send()).thenReturn(count);
-        when(web3j.ethGetTransactionCount(anyString(), any())).thenReturn(countReq);
+        doReturn(countReq).when(web3j).ethGetTransactionCount(anyString(), any());
 
-        Request<?, EthSendTransaction> sendReq = mock(Request.class);
+        Request sendReq = mock(Request.class);
         EthSendTransaction sendTx = new EthSendTransaction();
         sendTx.setResult(txHash);
         when(sendReq.send()).thenReturn(sendTx);
-        when(web3j.ethSendRawTransaction(anyString())).thenReturn(sendReq);
+        doReturn(sendReq).when(web3j).ethSendRawTransaction(anyString());
 
         TransactionReceipt receipt = new TransactionReceipt();
         receipt.setTransactionHash(txHash);
@@ -150,14 +153,15 @@ class TokenTransferServiceTest {
         receipt.setGasUsed("0x5208");
         receipt.setStatus(status);
 
-        Request<?, EthGetTransactionReceipt> receiptReq = mock(Request.class);
+        Request receiptReq = mock(Request.class);
         EthGetTransactionReceipt ethReceipt = new EthGetTransactionReceipt();
         ethReceipt.setResult(receipt);
         when(receiptReq.send()).thenReturn(ethReceipt);
-        when(web3j.ethGetTransactionReceipt(txHash)).thenReturn(receiptReq);
+        doReturn(receiptReq).when(web3j).ethGetTransactionReceipt(txHash);
     }
 
     private Sign.SignatureData fakeSig() {
-        return new Sign.SignatureData((byte) 0, new byte[32], new byte[32]);
+        // v=27 (recId=0) — web3j 4.12 TransactionEncoder expects 27 or 28
+        return new Sign.SignatureData((byte) 27, new byte[32], new byte[32]);
     }
 }

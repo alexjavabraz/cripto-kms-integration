@@ -5,7 +5,7 @@ import lombok.Data;
 
 @Data
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class CreationRequestDto {
+public class CreationRequestDto extends BaseRequestDto {
     private String idempotencyKey;
     private String timestamp;
     private Network network;
