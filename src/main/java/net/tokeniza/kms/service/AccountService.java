@@ -3,6 +3,7 @@ package net.tokeniza.kms.service;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.tokeniza.kms.kms.KmsSigner;
+import net.tokeniza.kms.persistence.WalletService;
 import org.springframework.stereotype.Service;
 import software.amazon.awssdk.services.kms.KmsClient;
 import software.amazon.awssdk.services.kms.model.*;
@@ -13,16 +14,12 @@ import software.amazon.awssdk.services.kms.model.*;
 public class AccountService {
 
     private final KmsClient kmsClient;
+    private final WalletService walletService;
 
     public record WalletResult(String keyId, String address) {}
 
-    /**
-     * Creates a new KMS asymmetric key (secp256k1 / SIGN_VERIFY) for a user and
-     * returns its Key ID and derived Ethereum address.
-     * The Key ID is stored as the user's walletId in the BFF.
-     */
-    public WalletResult createWallet(String userId) {
-        log.info("Creating KMS wallet for userId={}", userId);
+    public WalletResult createWallet(String userId, String network) {
+        log.info("Creating KMS wallet for userId={} network={}", userId, network);
 
         CreateKeyResponse createResponse = kmsClient.createKey(CreateKeyRequest.builder()
                 .keySpec(KeySpec.ECC_SECG_P256_K1)
@@ -31,20 +28,21 @@ public class AccountService {
                 .build());
 
         String keyId = createResponse.keyMetadata().keyId();
+        String alias = "alias/tokeniza-user-" + userId;
 
-        // Add alias for easier identification
         try {
             kmsClient.createAlias(CreateAliasRequest.builder()
-                    .aliasName("alias/tokeniza-user-" + userId)
+                    .aliasName(alias)
                     .targetKeyId(keyId)
                     .build());
         } catch (AlreadyExistsException e) {
             log.warn("KMS alias already exists for userId={}", userId);
         }
 
-        // Derive Ethereum address from the KMS public key
         KmsSigner signer = new KmsSigner(kmsClient, keyId);
         String address = signer.getAddress();
+
+        walletService.save(userId, keyId, address, network, alias);
 
         log.info("KMS wallet created: keyId={} address={} userId={}", keyId, address, userId);
         return new WalletResult(keyId, address);

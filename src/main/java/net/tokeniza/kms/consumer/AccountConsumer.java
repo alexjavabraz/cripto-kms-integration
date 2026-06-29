@@ -37,7 +37,7 @@ public class AccountConsumer {
             log.info("Account create: idempotencyKey={} userId={} network={}",
                     req.getIdempotencyKey(), req.getUserId(), req.getNetwork());
 
-            AccountService.WalletResult wallet = accountService.createWallet(req.getUserId());
+            AccountService.WalletResult wallet = accountService.createWallet(req.getUserId(), req.getNetwork());
             gasFundService.fundAsync(wallet.address());
 
             Map<String, Object> okPayload = successPayload(req, wallet, System.currentTimeMillis() - startMs);
