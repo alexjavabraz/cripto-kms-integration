@@ -1,17 +1,21 @@
 spring:
   application:
     name: kms-integration
-  rabbitmq:
-    host: ${RABBITMQ_HOST:localhost}
-    port: ${RABBITMQ_PORT:5672}
-    username: ${RABBITMQ_USERNAME:guest}
-    password: ${RABBITMQ_PASSWORD:guest}
-    ssl:
-      enabled: ${RABBITMQ_SSL_ENABLED:false}
   jackson:
     default-property-inclusion: non_null
     serialization:
       write-dates-as-timestamps: false
+
+  cloud:
+    aws:
+      region:
+        static: ${AWS_REGION:us-east-1}
+      credentials:
+        # Uses IAM role automatically on ECS/EC2 — no keys needed in env
+      sqs:
+        # Override with VPC endpoint URL in air-gapped environments:
+        # endpoint: https://vpce-xxx.sqs.us-east-1.vpce.amazonaws.com
+        endpoint: ${AWS_SQS_ENDPOINT:}
 
 management:
   endpoints:
@@ -33,7 +37,7 @@ kms:
   key-id: ${KMS_KEY_ID}
   wallet-address: ${KMS_WALLET_ADDRESS:}  # derived from KMS if blank
 
-  # DLT (client's permissioned blockchain)
+  # Client's permissioned DLT
   dlt:
     rpc-endpoint: ${DLT_RPC_ENDPOINT}
     chain-id: ${DLT_CHAIN_ID:1337}
@@ -43,26 +47,17 @@ kms:
     max-priority-fee-per-gas: ${DLT_MAX_PRIORITY_FEE_PER_GAS:0}
     gas-fund-amount-eth: ${DLT_GAS_FUND_AMOUNT_ETH:0.001}
 
-  # RabbitMQ queues (names must match BFF configuration)
-  queue:
-    token-creation: ${QUEUE_TOKEN_CREATION:dfns_listen_token_creation_request}
-    balance: ${QUEUE_BALANCE:queue_get_balance}
-    token-event: ${QUEUE_TOKEN_EVENT:token_event.queue}
-    token-transfer: ${QUEUE_TOKEN_TRANSFER:dfns_listen_token_transfer_request}
-    account-create: ${QUEUE_ACCOUNT_CREATE:dfns_listen_account_create_request}
-    user-transfer: ${QUEUE_USER_TRANSFER:dfns_listen_user_transfer_request}
-
-  # RabbitMQ exchanges
-  exchange:
-    token-creation-request: ${EXCHANGE_TOKEN_CREATION_REQUEST:bff_publish_token_creation_request}
-    token-creation-response: ${EXCHANGE_TOKEN_CREATION_RESPONSE:dfns_publish_token_creation_response}
-    balance-response: ${EXCHANGE_BALANCE_RESPONSE:balance_response}
-    token-event: ${EXCHANGE_TOKEN_EVENT:token_event}
-    token-event-response: ${EXCHANGE_TOKEN_EVENT_RESPONSE:token_event_response}
-    token-transfer-request: ${EXCHANGE_TOKEN_TRANSFER_REQUEST:bff_publish_token_transfer_request}
-    token-transfer-response: ${EXCHANGE_TOKEN_TRANSFER_RESPONSE:dfns_publish_token_transfer_response}
-    account-create-request: ${EXCHANGE_ACCOUNT_CREATE_REQUEST:bff_publish_account_create_request}
-    account-create-response: ${EXCHANGE_ACCOUNT_CREATE_RESPONSE:dfns_publish_account_create_response}
-    user-transfer-request: ${EXCHANGE_USER_TRANSFER_REQUEST:bff_publish_user_transfer_request}
-    user-transfer-response: ${EXCHANGE_USER_TRANSFER_RESPONSE:dfns_publish_user_transfer_response}
-    error: ${EXCHANGE_ERROR:token_creation_error}
+  # SQS queue names (must match the queues created in the client's AWS account)
+  sqs:
+    token-creation-request:  ${SQS_TOKEN_CREATION_REQUEST:kms-token-creation-request}
+    token-creation-response: ${SQS_TOKEN_CREATION_RESPONSE:kms-token-creation-response}
+    balance-request:         ${SQS_BALANCE_REQUEST:kms-balance-request}
+    balance-response:        ${SQS_BALANCE_RESPONSE:kms-balance-response}
+    token-event-request:     ${SQS_TOKEN_EVENT_REQUEST:kms-token-event-request}
+    token-event-response:    ${SQS_TOKEN_EVENT_RESPONSE:kms-token-event-response}
+    token-transfer-request:  ${SQS_TOKEN_TRANSFER_REQUEST:kms-token-transfer-request}
+    token-transfer-response: ${SQS_TOKEN_TRANSFER_RESPONSE:kms-token-transfer-response}
+    account-create-request:  ${SQS_ACCOUNT_CREATE_REQUEST:kms-account-create-request}
+    account-create-response: ${SQS_ACCOUNT_CREATE_RESPONSE:kms-account-create-response}
+    user-transfer-request:   ${SQS_USER_TRANSFER_REQUEST:kms-user-transfer-request}
+    user-transfer-response:  ${SQS_USER_TRANSFER_RESPONSE:kms-user-transfer-response}

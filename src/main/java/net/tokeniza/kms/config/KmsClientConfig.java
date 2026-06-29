@@ -17,7 +17,7 @@ public class KmsClientConfig {
     }
 
     @Bean
-    public KmsSigner kmsSigner(KmsClient kmsClient, AppProperties props) {
+    public KmsSigner platformSigner(KmsClient kmsClient, AppProperties props) {
         return new KmsSigner(kmsClient, props.getKeyId());
     }
 }

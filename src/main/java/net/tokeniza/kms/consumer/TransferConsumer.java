@@ -1,16 +1,15 @@
 package net.tokeniza.kms.consumer;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.rabbitmq.client.Channel;
+import io.awspring.cloud.sqs.annotation.SqsListener;
+import io.awspring.cloud.sqs.operations.SqsTemplate;
 import io.sentry.Sentry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.tokeniza.kms.config.AppProperties;
 import net.tokeniza.kms.dto.TokenTransferRequestDto;
 import net.tokeniza.kms.service.TokenTransferService;
-import org.springframework.amqp.core.Message;
-import org.springframework.amqp.rabbit.annotation.RabbitListener;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.messaging.Message;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
@@ -25,19 +24,17 @@ public class TransferConsumer {
     private static final String PROCESSED_BY = "kms-integration";
 
     private final TokenTransferService transferService;
-    private final RabbitTemplate rabbitTemplate;
+    private final SqsTemplate sqsTemplate;
     private final AppProperties props;
     private final ObjectMapper objectMapper;
 
-    @RabbitListener(queues = "${kms.queue.token-transfer}")
-    public void onMessage(Message message, Channel channel) throws Exception {
-        long tag = message.getMessageProperties().getDeliveryTag();
+    @SqsListener("${kms.sqs.token-transfer-request}")
+    public void onMessage(Message<String> message) {
         long startMs = System.currentTimeMillis();
         TokenTransferRequestDto req = null;
-
         try {
-            req = objectMapper.readValue(message.getBody(), TokenTransferRequestDto.class);
-            log.info("Processing token transfer: idempotencyKey={} network={} to={} amount={}",
+            req = objectMapper.readValue(message.getPayload(), TokenTransferRequestDto.class);
+            log.info("Token transfer: idempotencyKey={} network={} to={} amount={}",
                     req.getIdempotencyKey(), req.getNetwork(),
                     req.getTransfer().getToAddress(), req.getTransfer().getAmount());
 
@@ -48,82 +45,54 @@ public class TransferConsumer {
                     req.getToken().getDecimals()
             );
 
-            publishSuccess(req, result, System.currentTimeMillis() - startMs);
-            log.info("Token transfer succeeded: idempotencyKey={} txHash={}",
-                    req.getIdempotencyKey(), result.txHash());
+            send(props.getSqs().getTokenTransferResponse(), successPayload(req, result, System.currentTimeMillis() - startMs));
+            log.info("Token transfer succeeded: idempotencyKey={} txHash={}", req.getIdempotencyKey(), result.txHash());
 
         } catch (Exception e) {
             log.error("Token transfer failed: {}", e.getMessage(), e);
             Sentry.captureException(e);
             if (req != null) {
-                publishError(req, e.getMessage(), System.currentTimeMillis() - startMs);
+                send(props.getSqs().getTokenTransferResponse(), errorPayload(req, e.getMessage(), System.currentTimeMillis() - startMs));
             }
-        } finally {
-            channel.basicAck(tag, false);
+            // Do not re-throw — message is always deleted from SQS (never nack)
         }
     }
 
-    private void publishSuccess(TokenTransferRequestDto req,
-                                TokenTransferService.TransferResult result, long durationMs) {
-        Map<String, Object> response = new HashMap<>();
-        response.put("event", "token.transfer.succeeded");
-        response.put("idempotencyKey", req.getIdempotencyKey());
-        response.put("timestamp", Instant.now().toString());
-        response.put("network", req.getNetwork());
-        response.put("requester", Map.of("userId", req.getRequester().getUserId()));
-        response.put("token", Map.of(
-                "contractAddress", req.getToken().getContractAddress(),
-                "decimals", req.getToken().getDecimals()
-        ));
-        response.put("transfer", Map.of(
-                "toAddress", req.getTransfer().getToAddress(),
-                "amount", req.getTransfer().getAmount()
-        ));
-        response.put("result", Map.of(
-                "txHash", result.txHash(),
-                "blockNumber", result.blockNumber(),
-                "gasUsed", result.gasUsed()
-        ));
-        response.put("metadata", Map.of(
-                "correlationId", req.getMetadata() != null ? req.getMetadata().getCorrelationId() : "",
-                "processedBy", PROCESSED_BY,
-                "durationMs", durationMs
-        ));
-
-        rabbitTemplate.convertAndSend(
-                props.getExchange().getTokenTransferResponse(),
-                "token.transfer.succeeded",
-                response
-        );
+    private Map<String, Object> successPayload(TokenTransferRequestDto req,
+                                               TokenTransferService.TransferResult result, long durationMs) {
+        Map<String, Object> r = new HashMap<>();
+        r.put("event", "token.transfer.succeeded");
+        r.put("idempotencyKey", req.getIdempotencyKey());
+        r.put("timestamp", Instant.now().toString());
+        r.put("network", req.getNetwork());
+        r.put("requester", Map.of("userId", req.getRequester().getUserId()));
+        r.put("token", Map.of("contractAddress", req.getToken().getContractAddress(), "decimals", req.getToken().getDecimals()));
+        r.put("transfer", Map.of("toAddress", req.getTransfer().getToAddress(), "amount", req.getTransfer().getAmount()));
+        r.put("result", Map.of("txHash", result.txHash(), "blockNumber", result.blockNumber(), "gasUsed", result.gasUsed()));
+        r.put("metadata", metadata(req.getMetadata() != null ? req.getMetadata().getCorrelationId() : "", durationMs));
+        return r;
     }
 
-    private void publishError(TokenTransferRequestDto req, String errorMessage, long durationMs) {
-        Map<String, Object> response = new HashMap<>();
-        response.put("event", "token.transfer.failed");
-        response.put("idempotencyKey", req.getIdempotencyKey());
-        response.put("timestamp", Instant.now().toString());
-        response.put("network", req.getNetwork());
-        response.put("requester", Map.of("userId", req.getRequester() != null ? req.getRequester().getUserId() : "unknown"));
-        response.put("token", Map.of(
-                "contractAddress", req.getToken() != null ? req.getToken().getContractAddress() : "0x0000000000000000000000000000000000000000",
-                "decimals", 18
-        ));
-        response.put("transfer", Map.of(
-                "toAddress", req.getTransfer() != null ? req.getTransfer().getToAddress() : "0x0000000000000000000000000000000000000000",
-                "amount", "0"
-        ));
-        response.put("error", Map.of("code", "EXECUTION_FAILED", "message", errorMessage));
-        response.put("metadata", Map.of(
-                "correlationId", req.getMetadata() != null && req.getMetadata().getCorrelationId() != null
-                        ? req.getMetadata().getCorrelationId() : "",
-                "processedBy", PROCESSED_BY,
-                "durationMs", durationMs
-        ));
+    private Map<String, Object> errorPayload(TokenTransferRequestDto req, String errorMessage, long durationMs) {
+        Map<String, Object> r = new HashMap<>();
+        r.put("event", "token.transfer.failed");
+        r.put("idempotencyKey", req.getIdempotencyKey());
+        r.put("timestamp", Instant.now().toString());
+        r.put("network", req.getNetwork());
+        r.put("requester", Map.of("userId", req.getRequester() != null ? req.getRequester().getUserId() : "unknown"));
+        r.put("token", Map.of("contractAddress", req.getToken() != null ? req.getToken().getContractAddress() : "0x0", "decimals", 18));
+        r.put("transfer", Map.of("toAddress", "0x0", "amount", "0"));
+        r.put("error", Map.of("code", "EXECUTION_FAILED", "message", errorMessage));
+        r.put("metadata", metadata(req.getMetadata() != null ? req.getMetadata().getCorrelationId() : "", durationMs));
+        return r;
+    }
 
-        rabbitTemplate.convertAndSend(
-                props.getExchange().getTokenTransferResponse(),
-                "token.transfer.failed",
-                response
-        );
+    private Map<String, Object> metadata(String correlationId, long durationMs) {
+        return Map.of("correlationId", correlationId != null ? correlationId : "",
+                      "processedBy", PROCESSED_BY, "durationMs", durationMs);
+    }
+
+    private void send(String queue, Object payload) {
+        sqsTemplate.send(to -> to.queue(queue).payload(payload));
     }
 }

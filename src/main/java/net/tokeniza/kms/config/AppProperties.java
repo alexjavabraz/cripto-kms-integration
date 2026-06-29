@@ -14,8 +14,7 @@ public class AppProperties {
     private String walletAddress = "";
 
     private Dlt dlt = new Dlt();
-    private Queue queue = new Queue();
-    private Exchange exchange = new Exchange();
+    private Sqs sqs = new Sqs();
 
     @Data
     public static class Dlt {
@@ -29,28 +28,18 @@ public class AppProperties {
     }
 
     @Data
-    public static class Queue {
-        private String tokenCreation = "dfns_listen_token_creation_request";
-        private String balance = "queue_get_balance";
-        private String tokenEvent = "token_event.queue";
-        private String tokenTransfer = "dfns_listen_token_transfer_request";
-        private String accountCreate = "dfns_listen_account_create_request";
-        private String userTransfer = "dfns_listen_user_transfer_request";
-    }
-
-    @Data
-    public static class Exchange {
-        private String tokenCreationRequest = "bff_publish_token_creation_request";
-        private String tokenCreationResponse = "dfns_publish_token_creation_response";
-        private String balanceResponse = "balance_response";
-        private String tokenEvent = "token_event";
-        private String tokenEventResponse = "token_event_response";
-        private String tokenTransferRequest = "bff_publish_token_transfer_request";
-        private String tokenTransferResponse = "dfns_publish_token_transfer_response";
-        private String accountCreateRequest = "bff_publish_account_create_request";
-        private String accountCreateResponse = "dfns_publish_account_create_response";
-        private String userTransferRequest = "bff_publish_user_transfer_request";
-        private String userTransferResponse = "dfns_publish_user_transfer_response";
-        private String error = "token_creation_error";
+    public static class Sqs {
+        private String tokenCreationRequest  = "kms-token-creation-request";
+        private String tokenCreationResponse = "kms-token-creation-response";
+        private String balanceRequest        = "kms-balance-request";
+        private String balanceResponse       = "kms-balance-response";
+        private String tokenEventRequest     = "kms-token-event-request";
+        private String tokenEventResponse    = "kms-token-event-response";
+        private String tokenTransferRequest  = "kms-token-transfer-request";
+        private String tokenTransferResponse = "kms-token-transfer-response";
+        private String accountCreateRequest  = "kms-account-create-request";
+        private String accountCreateResponse = "kms-account-create-response";
+        private String userTransferRequest   = "kms-user-transfer-request";
+        private String userTransferResponse  = "kms-user-transfer-response";
     }
 }
