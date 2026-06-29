@@ -11,8 +11,9 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class RequestLogService {
 
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+
     private final RequestLogRepository repository;
-    private final ObjectMapper objectMapper;
 
     @Transactional
     public RequestLog logReceived(String idempotencyKey, String type, String responseQueue, Object rawPayload) {
@@ -43,11 +44,11 @@ public class RequestLogService {
         });
     }
 
-    private String toJson(Object obj) {
+    private static String toJson(Object obj) {
         if (obj == null) return null;
         if (obj instanceof String s) return s;
         try {
-            return objectMapper.writeValueAsString(obj);
+            return MAPPER.writeValueAsString(obj);
         } catch (Exception e) {
             log.warn("Failed to serialise payload to JSON: {}", e.getMessage());
             return obj.toString();

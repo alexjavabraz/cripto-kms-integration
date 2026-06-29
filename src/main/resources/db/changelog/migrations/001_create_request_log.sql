@@ -14,9 +14,9 @@ CREATE TABLE IF NOT EXISTS request_log (
     updated_at      TIMESTAMP WITH TIME ZONE    NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_request_log_idempotency_key ON request_log(idempotency_key);
-CREATE INDEX idx_request_log_type            ON request_log(type);
-CREATE INDEX idx_request_log_status          ON request_log(status);
-CREATE INDEX idx_request_log_created_at      ON request_log(created_at);
+CREATE INDEX IF NOT EXISTS idx_request_log_idempotency_key ON request_log(idempotency_key);
+CREATE INDEX IF NOT EXISTS idx_request_log_type            ON request_log(type);
+CREATE INDEX IF NOT EXISTS idx_request_log_status          ON request_log(status);
+CREATE INDEX IF NOT EXISTS idx_request_log_created_at      ON request_log(created_at);
 
 --rollback DROP TABLE IF EXISTS request_log;

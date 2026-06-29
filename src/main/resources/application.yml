@@ -36,8 +36,6 @@ spring:
     aws:
       region:
         static: ${AWS_REGION:us-east-1}
-      credentials:
-        # Uses IAM role automatically on ECS/EC2 — no keys needed in env
       sqs:
         endpoint: ${AWS_SQS_ENDPOINT:}
       sns:
