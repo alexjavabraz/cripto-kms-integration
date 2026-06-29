@@ -4,7 +4,6 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.awspring.cloud.sqs.annotation.SqsListener;
-import io.sentry.Sentry;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -57,7 +56,6 @@ public class MessageDispatcher {
             }
         } catch (Exception e) {
             log.error("Dispatch error: {}", e.getMessage(), e);
-            Sentry.captureException(e);
             // Do not re-throw — message is always deleted from SQS (never nack)
         }
     }

@@ -1,0 +1,17 @@
+{
+  "type": "USER_TRANSFER",
+  "responseQueue": "https://sqs.us-east-1.amazonaws.com/123456789012/minha-fila-resposta.fifo",
+  "event": "user.transfer.requested",
+  "requestId": "req-user-transfer-001",
+  "userId": "user-abc123",
+  "userWalletId": "arn:aws:kms:us-east-1:123456789012:key/usuario-kms-key-id",
+  "fromAddress": "0xUserWalletAddress00000000000000000000001",
+  "toAddress": "0xRecipientAddress00000000000000000000001",
+  "contractAddress": "0xContractAddress0000000000000000000000001",
+  "network": "besu-local",
+  "amount": "100000000000000000000",
+  "decimals": 18,
+  "metadata": {
+    "correlationId": "corr-user-transfer-001"
+  }
+}

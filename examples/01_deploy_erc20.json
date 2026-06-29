@@ -1,0 +1,25 @@
+{
+  "type": "TOKEN_CREATION",
+  "idempotencyKey": "deploy-erc20-001",
+  "responseQueue": "https://sqs.us-east-1.amazonaws.com/123456789012/minha-fila-resposta.fifo",
+  "timestamp": "2026-06-29T00:00:00Z",
+  "network": {
+    "name": "besu-local",
+    "chainId": 1337
+  },
+  "token": {
+    "standard": "ERC20",
+    "name": "Real Brasileiro",
+    "symbol": "BRLN",
+    "ownerAddress": "0xAbCdEf0123456789AbCdEf0123456789AbCdEf01"
+  },
+  "params": {
+    "erc20": {
+      "decimals": 18,
+      "supply": "1000000000000000000000000"
+    }
+  },
+  "metadata": {
+    "correlationId": "corr-erc20-001"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "type": "TOKEN_CREATION",
+  "idempotencyKey": "deploy-erc721-001",
+  "responseQueue": "https://sqs.us-east-1.amazonaws.com/123456789012/minha-fila-resposta.fifo",
+  "timestamp": "2026-06-29T00:00:00Z",
+  "network": {
+    "name": "besu-local",
+    "chainId": 1337
+  },
+  "token": {
+    "standard": "ERC721",
+    "name": "Tokeniza NFT",
+    "symbol": "TNFT",
+    "ownerAddress": "0xAbCdEf0123456789AbCdEf0123456789AbCdEf01"
+  },
+  "params": {
+    "erc721": {
+      "baseUri": "https://api.tokeniza.net/nft/metadata/"
+    }
+  },
+  "metadata": {
+    "correlationId": "corr-erc721-001"
+  }
+}

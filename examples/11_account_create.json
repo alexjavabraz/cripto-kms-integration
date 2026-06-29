@@ -1,0 +1,8 @@
+{
+  "type": "ACCOUNT_CREATE",
+  "idempotencyKey": "account-create-001",
+  "responseQueue": "https://sqs.us-east-1.amazonaws.com/123456789012/minha-fila-resposta.fifo",
+  "event": "account.create.requested",
+  "userId": "user-abc123",
+  "network": "besu-local"
+}

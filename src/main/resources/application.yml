@@ -52,11 +52,6 @@ management:
     health:
       show-details: always
 
-sentry:
-  dsn: ${SENTRY_DSN:}
-  environment: ${SPRING_PROFILES_ACTIVE:default}
-  traces-sample-rate: 0.1
-
 kms:
   region: ${AWS_REGION:us-east-1}
   key-id: ${KMS_KEY_ID}

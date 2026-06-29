@@ -1,0 +1,20 @@
+{
+  "type": "TOKEN_EVENT",
+  "idempotencyKey": "unpause-001",
+  "responseQueue": "https://sqs.us-east-1.amazonaws.com/123456789012/minha-fila-resposta.fifo",
+  "network": {
+    "name": "besu-local",
+    "chainId": 1337
+  },
+  "token": {
+    "address": "0xContractAddress0000000000000000000000001",
+    "standard": "ERC20",
+    "decimals": 18
+  },
+  "operation": {
+    "type": "unpause"
+  },
+  "metadata": {
+    "correlationId": "corr-unpause-001"
+  }
+}

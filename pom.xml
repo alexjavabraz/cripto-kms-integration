@@ -22,7 +22,6 @@
         <aws-sdk.version>2.25.70</aws-sdk.version>
         <spring-cloud-aws.version>3.2.1</spring-cloud-aws.version>
         <web3j.version>4.12.0</web3j.version>
-        <sentry.version>7.14.0</sentry.version>
     </properties>
 
     <dependencyManagement>
@@ -123,13 +122,6 @@
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
             <optional>true</optional>
-        </dependency>
-
-        <!-- Sentry -->
-        <dependency>
-            <groupId>io.sentry</groupId>
-            <artifactId>sentry-spring-boot-starter-jakarta</artifactId>
-            <version>${sentry.version}</version>
         </dependency>
 
         <!-- Test -->

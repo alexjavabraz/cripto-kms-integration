@@ -1,7 +1,6 @@
 package net.tokeniza.kms.consumer;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.sentry.Sentry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.tokeniza.kms.dto.UserTransferRequestDto;
@@ -51,7 +50,6 @@ public class UserTransferConsumer {
 
         } catch (Exception e) {
             log.error("User transfer failed: requestId={} error={}", req != null ? req.getRequestId() : "?", e.getMessage(), e);
-            Sentry.captureException(e);
             if (req != null) {
                 Map<String, Object> errPayload = errorPayload(req, e.getMessage(), System.currentTimeMillis() - startMs);
                 responsePublisher.publish(req.getResponseQueue(), req.getRequestId(), errPayload);

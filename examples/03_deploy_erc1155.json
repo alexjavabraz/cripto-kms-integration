@@ -1,0 +1,24 @@
+{
+  "type": "TOKEN_CREATION",
+  "idempotencyKey": "deploy-erc1155-001",
+  "responseQueue": "https://sqs.us-east-1.amazonaws.com/123456789012/minha-fila-resposta.fifo",
+  "timestamp": "2026-06-29T00:00:00Z",
+  "network": {
+    "name": "besu-local",
+    "chainId": 1337
+  },
+  "token": {
+    "standard": "ERC1155",
+    "name": "Tokeniza Multi",
+    "symbol": "TMLT",
+    "ownerAddress": "0xAbCdEf0123456789AbCdEf0123456789AbCdEf01"
+  },
+  "params": {
+    "erc1155": {
+      "uri": "https://api.tokeniza.net/erc1155/metadata/{id}"
+    }
+  },
+  "metadata": {
+    "correlationId": "corr-erc1155-001"
+  }
+}

@@ -1,7 +1,6 @@
 package net.tokeniza.kms.consumer;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.sentry.Sentry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.tokeniza.kms.config.AppProperties;
@@ -47,7 +46,6 @@ public class TokenEventConsumer {
 
         } catch (Exception e) {
             log.error("Token event failed: {}", e.getMessage(), e);
-            Sentry.captureException(e);
             if (req != null) {
                 Map<String, Object> errPayload = errorPayload(req, e.getMessage(), System.currentTimeMillis() - startMs);
                 responsePublisher.publish(req.getResponseQueue(), req.getIdempotencyKey(), errPayload);
