@@ -96,7 +96,6 @@ class CreationConsumerIntegrationTest {
         props.getDlt().setGasLimit(10_000_000L);
         props.getDlt().setMaxFeePerGas(0L);
         props.getDlt().setMaxPriorityFeePerGas(0L);
-        props.getDlt().getBytecode().put("ERC20", loadErc20Bytecode());
 
         consumer = new CreationConsumer(web3j, kmsSigner, responsePublisher, requestLogService, props, objectMapper);
     }
@@ -180,24 +179,6 @@ class CreationConsumerIntegrationTest {
         assertThat(error).containsEntry("code", "DUPLICATE_REQUEST");
     }
 
-    @Test
-    void deployERC20_missingBytecode_publishesError() throws Exception {
-        props.getDlt().getBytecode().remove("ERC20");
-
-        consumer.handle(buildCreationRequest("key-no-bytecode", "X", "X", 18, "1",
-                kmsSigner.getAddress()));
-
-        ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
-        verify(snsPublisher, timeout(5_000)).publish(eq("key-no-bytecode"), captor.capture());
-
-        @SuppressWarnings("unchecked")
-        Map<String, Object> response = (Map<String, Object>) captor.getValue();
-        assertThat(response).containsEntry("event", "token.creation.failed");
-        @SuppressWarnings("unchecked")
-        Map<String, Object> error = (Map<String, Object>) response.get("error");
-        assertThat(error.get("message").toString()).containsIgnoringCase("BYTECODE_ERC20");
-    }
-
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private String buildCreationRequest(String idempotencyKey, String name, String symbol,
@@ -214,12 +195,6 @@ class CreationConsumerIntegrationTest {
                 "params", Map.of(
                         "erc20", Map.of("decimals", decimals, "supply", supply)),
                 "metadata", Map.of("correlationId", "test-correlation")));
-    }
-
-    private String loadErc20Bytecode() throws IOException {
-        var url = getClass().getClassLoader().getResource("contracts/ERC20Token.bytecode");
-        assertThat(url).isNotNull();
-        return Files.readString(Path.of(url.getPath())).trim();
     }
 
     /** Builds a KmsClient mock backed by a local secp256k1 key pair. */

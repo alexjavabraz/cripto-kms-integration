@@ -65,10 +65,6 @@ kms:
     max-fee-per-gas: ${DLT_MAX_FEE_PER_GAS:0}
     max-priority-fee-per-gas: ${DLT_MAX_PRIORITY_FEE_PER_GAS:0}
     gas-fund-amount-eth: ${DLT_GAS_FUND_AMOUNT_ETH:0.001}
-    bytecode:
-      ERC20:   ${BYTECODE_ERC20:}
-      ERC721:  ${BYTECODE_ERC721:}
-      ERC1155: ${BYTECODE_ERC1155:}
 
   # SNS FIFO topic — kms-integration publishes responses here
   sns:

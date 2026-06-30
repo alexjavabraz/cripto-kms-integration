@@ -4,6 +4,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.tokeniza.kms.config.AppProperties;
+import net.tokeniza.kms.contracts.TokenizaERC1155;
+import net.tokeniza.kms.contracts.TokenizaERC20;
+import net.tokeniza.kms.contracts.TokenizaERC721;
 import net.tokeniza.kms.dto.CreationRequestDto;
 import net.tokeniza.kms.kms.KmsSigner;
 import net.tokeniza.kms.persistence.RequestLogService;
@@ -86,12 +89,13 @@ public class CreationConsumer {
 
     private String resolveConstructorBytecode(CreationRequestDto req) {
         String standard = req.getToken().getStandard().toUpperCase();
-        String bytecode = props.getDlt().getBytecode().get(standard);
-        if (bytecode == null || bytecode.isBlank()) {
-            throw new IllegalStateException("Missing bytecode for standard " + standard
-                    + " — set BYTECODE_" + standard + " env var");
-        }
-        return appendConstructorArgs(bytecode, req);
+        String binary = switch (standard) {
+            case "ERC20"   -> TokenizaERC20.BINARY;
+            case "ERC721"  -> TokenizaERC721.BINARY;
+            case "ERC1155" -> TokenizaERC1155.BINARY;
+            default -> throw new IllegalArgumentException("Padrão não suportado: " + standard);
+        };
+        return appendConstructorArgs(binary, req);
     }
 
     private String appendConstructorArgs(String bytecode, CreationRequestDto req) {
