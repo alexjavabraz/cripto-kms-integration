@@ -8,6 +8,6 @@ import lombok.Data;
 public class AccountCreateRequestDto extends BaseRequestDto {
     private String event;
     private String idempotencyKey;
-    private String userId;
-    private String network;
+    /** Client-defined unique identifier — never exposed as KMS keyId. */
+    private String clientId;
 }

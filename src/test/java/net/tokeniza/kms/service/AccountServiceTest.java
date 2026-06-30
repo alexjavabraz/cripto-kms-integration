@@ -30,10 +30,9 @@ class AccountServiceTest {
     @InjectMocks
     AccountService accountService;
 
-    private static final String USER_ID  = "user-123";
-    private static final String NETWORK  = "besu-local";
-    private static final String KEY_ID   = "arn:aws:kms:us-east-1:123456789:key/abc-123";
-    private static final String ALIAS    = "alias/tokeniza-user-" + USER_ID;
+    private static final String CLIENT_ID = "cliente-123";
+    private static final String KEY_ID    = "arn:aws:kms:us-east-1:123456789:key/abc-123";
+    private static final String ALIAS     = "alias/tokeniza-client-" + CLIENT_ID;
 
     private void stubKms(byte[] publicKeyDer) {
         when(kmsClient.createKey(any(CreateKeyRequest.class)))
@@ -48,13 +47,13 @@ class AccountServiceTest {
                 .thenReturn(CreateAliasResponse.builder().build());
     }
 
-    private Wallet fakeWallet(String userId, String keyId, String address) {
+    private Wallet fakeWallet(String clientId, String keyId, String address) {
         Wallet w = new Wallet();
         w.setId(UUID.randomUUID());
-        w.setUserId(userId);
+        w.setUserId(clientId);
         w.setKeyId(keyId);
         w.setAddress(address);
-        w.setNetwork(NETWORK);
+        w.setNetwork("evm");
         w.setAlias(ALIAS);
         w.setCreatedAt(Instant.now());
         return w;
@@ -68,9 +67,9 @@ class AccountServiceTest {
 
         stubKms(publicKeyDer);
         when(walletService.save(any(), any(), any(), any(), any()))
-                .thenReturn(fakeWallet(USER_ID, KEY_ID, expectedAddress));
+                .thenReturn(fakeWallet(CLIENT_ID, KEY_ID, expectedAddress));
 
-        AccountService.WalletResult result = accountService.createWallet(USER_ID, NETWORK);
+        AccountService.WalletResult result = accountService.createWallet(CLIENT_ID);
 
         assertThat(result.keyId()).isEqualTo(KEY_ID);
         assertThat(result.address()).isEqualToIgnoringCase(expectedAddress);
@@ -82,9 +81,9 @@ class AccountServiceTest {
         var keyPair = Keys.createEcKeyPair();
         stubKms(TestCryptoUtils.buildPublicKeyDer(keyPair.getPublicKey()));
         when(walletService.save(any(), any(), any(), any(), any()))
-                .thenReturn(fakeWallet(USER_ID, KEY_ID, "0x" + Keys.getAddress(keyPair)));
+                .thenReturn(fakeWallet(CLIENT_ID, KEY_ID, "0x" + Keys.getAddress(keyPair)));
 
-        accountService.createWallet(USER_ID, NETWORK);
+        accountService.createWallet(CLIENT_ID);
 
         ArgumentCaptor<CreateKeyRequest> captor = ArgumentCaptor.forClass(CreateKeyRequest.class);
         verify(kmsClient).createKey(captor.capture());
@@ -93,13 +92,13 @@ class AccountServiceTest {
     }
 
     @Test
-    void createWallet_createsAliasWithUserId() throws Exception {
+    void createWallet_createsAliasWithClientId() throws Exception {
         var keyPair = Keys.createEcKeyPair();
         stubKms(TestCryptoUtils.buildPublicKeyDer(keyPair.getPublicKey()));
         when(walletService.save(any(), any(), any(), any(), any()))
-                .thenReturn(fakeWallet(USER_ID, KEY_ID, "0x" + Keys.getAddress(keyPair)));
+                .thenReturn(fakeWallet(CLIENT_ID, KEY_ID, "0x" + Keys.getAddress(keyPair)));
 
-        accountService.createWallet(USER_ID, NETWORK);
+        accountService.createWallet(CLIENT_ID);
 
         ArgumentCaptor<CreateAliasRequest> captor = ArgumentCaptor.forClass(CreateAliasRequest.class);
         verify(kmsClient).createAlias(captor.capture());
@@ -108,20 +107,20 @@ class AccountServiceTest {
     }
 
     @Test
-    void createWallet_persistsWalletWithCorrectFields() throws Exception {
+    void createWallet_persistsWalletWithEvmNetworkAndClientId() throws Exception {
         var keyPair = Keys.createEcKeyPair();
         String expectedAddress = "0x" + Keys.getAddress(keyPair);
         stubKms(TestCryptoUtils.buildPublicKeyDer(keyPair.getPublicKey()));
         when(walletService.save(any(), any(), any(), any(), any()))
-                .thenReturn(fakeWallet(USER_ID, KEY_ID, expectedAddress));
+                .thenReturn(fakeWallet(CLIENT_ID, KEY_ID, expectedAddress));
 
-        accountService.createWallet(USER_ID, NETWORK);
+        accountService.createWallet(CLIENT_ID);
 
         verify(walletService).save(
-                eq(USER_ID),
+                eq(CLIENT_ID),
                 eq(KEY_ID),
                 argThat(addr -> addr.equalsIgnoreCase(expectedAddress)),
-                eq(NETWORK),
+                eq("evm"),
                 eq(ALIAS)
         );
     }
@@ -141,23 +140,23 @@ class AccountServiceTest {
         when(kmsClient.createAlias(any(CreateAliasRequest.class)))
                 .thenThrow(AlreadyExistsException.builder().message("alias exists").build());
         when(walletService.save(any(), any(), any(), any(), any()))
-                .thenReturn(fakeWallet(USER_ID, KEY_ID, address));
+                .thenReturn(fakeWallet(CLIENT_ID, KEY_ID, address));
 
-        assertThatCode(() -> accountService.createWallet(USER_ID, NETWORK)).doesNotThrowAnyException();
+        assertThatCode(() -> accountService.createWallet(CLIENT_ID)).doesNotThrowAnyException();
         verify(walletService).save(any(), any(), any(), any(), any());
     }
 
     @Test
-    void createWallet_includesNetworkInDescription() throws Exception {
+    void createWallet_descriptionContainsClientId() throws Exception {
         var keyPair = Keys.createEcKeyPair();
         stubKms(TestCryptoUtils.buildPublicKeyDer(keyPair.getPublicKey()));
         when(walletService.save(any(), any(), any(), any(), any()))
-                .thenReturn(fakeWallet(USER_ID, KEY_ID, "0x" + Keys.getAddress(keyPair)));
+                .thenReturn(fakeWallet(CLIENT_ID, KEY_ID, "0x" + Keys.getAddress(keyPair)));
 
-        accountService.createWallet(USER_ID, NETWORK);
+        accountService.createWallet(CLIENT_ID);
 
         ArgumentCaptor<CreateKeyRequest> captor = ArgumentCaptor.forClass(CreateKeyRequest.class);
         verify(kmsClient).createKey(captor.capture());
-        assertThat(captor.getValue().description()).contains(USER_ID);
+        assertThat(captor.getValue().description()).contains(CLIENT_ID);
     }
 }

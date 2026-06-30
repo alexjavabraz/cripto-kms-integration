@@ -38,6 +38,10 @@ public class WalletService {
         return repository.findFirstByRole("ADMIN");
     }
 
+    public Optional<Wallet> findByClientId(String clientId) {
+        return repository.findFirstByUserId(clientId);
+    }
+
     public List<Wallet> findByUserId(String userId) {
         return repository.findByUserId(userId);
     }
