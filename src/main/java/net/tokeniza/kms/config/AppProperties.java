@@ -12,6 +12,7 @@ public class AppProperties {
     private String region = "us-east-1";
     private String keyId;
     private String walletAddress = "";
+    private String kmsEndpoint = "";
 
     private Dlt dlt = new Dlt();
     private Sns sns = new Sns();

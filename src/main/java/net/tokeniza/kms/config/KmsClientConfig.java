@@ -6,14 +6,18 @@ import org.springframework.context.annotation.Configuration;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.kms.KmsClient;
 
+import java.net.URI;
+
 @Configuration
 public class KmsClientConfig {
 
     @Bean
     public KmsClient kmsClient(AppProperties props) {
-        return KmsClient.builder()
-                .region(Region.of(props.getRegion()))
-                .build();
+        var builder = KmsClient.builder().region(Region.of(props.getRegion()));
+        if (props.getKmsEndpoint() != null && !props.getKmsEndpoint().isBlank()) {
+            builder.endpointOverride(URI.create(props.getKmsEndpoint()));
+        }
+        return builder.build();
     }
 
     @Bean

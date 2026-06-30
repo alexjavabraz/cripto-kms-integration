@@ -56,6 +56,7 @@ kms:
   region: ${AWS_REGION:us-east-1}
   key-id: ${KMS_KEY_ID:}
   wallet-address: ${KMS_WALLET_ADDRESS:}
+  kms-endpoint: ${AWS_KMS_ENDPOINT:}
 
   dlt:
     rpc-endpoint: ${DLT_RPC_ENDPOINT}
