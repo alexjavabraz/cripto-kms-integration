@@ -1,127 +1,286 @@
 # kms-integration
 
-Blockchain signing service for regulated, air-gapped AWS environments.
+Serviço de assinatura blockchain para ambientes AWS regulados e isolados.
 
-Replaces `dfns_integration` (DFNS SaaS) with AWS KMS for Ethereum/EVM transaction signing. Communicates exclusively via **AWS SQS** — no inbound ports, no internet required.
-
----
-
-## Architecture
-
-```
-BFF (Node.js)
-  │  publishes request
-  ▼
-SQS request queue
-  │  @SqsListener
-  ▼
-kms-integration (Java / Spring Boot)
-  │  signs via AWS KMS (ECC_SECG_P256K1)
-  │  submits tx via RPC
-  ▼
-Permissioned DLT network
-  │  result published
-  ▼
-SQS response queue
-  │  @SqsListener
-  ▼
-BFF (Node.js)
-```
-
-All AWS services (SQS, KMS, ECR) are accessed via **VPC Interface Endpoints** — no traffic leaves the client's VPC.
+Substitui a integração com DFNS (SaaS externo) pelo AWS KMS para assinar transações Ethereum/EVM. Toda comunicação é feita via **AWS SQS** — sem portas de entrada expostas, sem dependência de internet.
 
 ---
 
-## SQS Queues
+## Arquitetura
 
-Twelve queues are required. Standard queues are sufficient; FIFO queues are not needed.
+```
+BFF (Node.js)
+  │  publica mensagem na fila SQS com campo "type" e "responseQueue"
+  ▼
+Fila SQS FIFO (entrada — única fila para todos os tipos)
+  │  @SqsListener → MessageDispatcher roteia pelo campo "type"
+  ▼
+kms-integration (Java 21 / Spring Boot 3)
+  │  assina via AWS KMS (ECC_SECG_P256K1)
+  │  submete transação via RPC (Besu / EVM)
+  │  grava log no PostgreSQL
+  ▼
+Rede DLT permissionada (Besu)
+  │  resultado publicado
+  ▼
+responseQueue (fila SQS informada na mensagem)
+  │  ou tópico SNS FIFO padrão se responseQueue não informado
+  ▼
+BFF (Node.js)
+```
 
-| Queue name (default) | Direction | Consumer |
+Todos os serviços AWS (SQS, SNS, KMS, Secrets Manager) são acessados via **VPC Interface Endpoints** — nenhum tráfego sai da VPC do cliente.
+
+---
+
+## Tipos de mensagem
+
+Todas as mensagens chegam na mesma fila SQS. O campo `type` determina o roteamento.
+
+| `type` | Descrição | Consumer |
 |---|---|---|
-| `kms-token-creation-request` | BFF → kms-integration | `CreationConsumer` |
-| `kms-token-creation-response` | kms-integration → BFF | BFF listener |
-| `kms-balance-request` | BFF → kms-integration | `BalanceConsumer` |
-| `kms-balance-response` | kms-integration → BFF | BFF listener |
-| `kms-token-event-request` | BFF → kms-integration | `TokenEventConsumer` |
-| `kms-token-event-response` | kms-integration → BFF | BFF listener |
-| `kms-token-transfer-request` | BFF → kms-integration | `TransferConsumer` |
-| `kms-token-transfer-response` | kms-integration → BFF | BFF listener |
-| `kms-account-create-request` | BFF → kms-integration | `AccountConsumer` |
-| `kms-account-create-response` | kms-integration → BFF | BFF listener |
-| `kms-user-transfer-request` | BFF → kms-integration | `UserTransferConsumer` |
-| `kms-user-transfer-response` | kms-integration → BFF | BFF listener |
+| `TOKEN_CREATION` | Deploy de contrato ERC-20, ERC-721 ou ERC-1155 | `CreationConsumer` |
+| `TOKEN_EVENT` | Mint, burn, transfer, pause ou unpause | `TokenEventConsumer` |
+| `TOKEN_TRANSFER` | Transferência de tokens pela wallet da plataforma | `TransferConsumer` |
+| `USER_TRANSFER` | Transferência de tokens pela wallet KMS do usuário | `UserTransferConsumer` |
+| `BALANCE_QUERY` | Consulta de saldo ERC-20 | `BalanceConsumer` |
+| `ACCOUNT_CREATE` | Criação de wallet KMS para novo usuário | `AccountConsumer` |
 
-### Create all queues (AWS CLI)
+---
+
+## Formato das mensagens
+
+### Campo obrigatório em todas as mensagens
+
+```json
+{
+  "type": "TOKEN_CREATION",
+  "responseQueue": "https://sqs.us-east-1.amazonaws.com/123456789012/minha-fila-resposta.fifo"
+}
+```
+
+- **`type`** — tipo da operação (ver tabela acima)
+- **`responseQueue`** — URL da fila SQS onde a resposta deve ser entregue. Se omitido, a resposta vai para o tópico SNS configurado em `SNS_TOPIC_ARN`
+
+### Envelope SNS (quando a fila é alimentada via SNS)
+
+Se o BFF publica em um tópico SNS que entrega na fila SQS, o `MessageDispatcher` lê o `type` do `MessageAttribute` do envelope SNS automaticamente. Em testes diretos na fila, o campo `type` pode estar na raiz do JSON.
+
+---
+
+## Exemplos de mensagens
+
+A pasta `examples/` contém um JSON de exemplo para cada operação:
+
+| Arquivo | Operação |
+|---|---|
+| `01_deploy_erc20.json` | Deploy de contrato ERC-20 |
+| `02_deploy_erc721.json` | Deploy de contrato ERC-721 |
+| `03_deploy_erc1155.json` | Deploy de contrato ERC-1155 |
+| `04_mint.json` | Mint de tokens |
+| `05_burn.json` | Burn de tokens |
+| `06_transfer_plataforma.json` | Transferência pela wallet da plataforma |
+| `07_transfer_usuario.json` | Transferência pela wallet KMS do usuário |
+| `08_pause.json` | Pausar contrato |
+| `09_unpause.json` | Despausar contrato |
+| `10_balance.json` | Consulta de saldo |
+| `11_account_create.json` | Criar wallet KMS para usuário |
+
+Para enviar um exemplo para a fila (LocalStack ou AWS):
 
 ```bash
-REGION=us-east-1
-ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-
-QUEUES=(
-  kms-token-creation-request
-  kms-token-creation-response
-  kms-balance-request
-  kms-balance-response
-  kms-token-event-request
-  kms-token-event-response
-  kms-token-transfer-request
-  kms-token-transfer-response
-  kms-account-create-request
-  kms-account-create-response
-  kms-user-transfer-request
-  kms-user-transfer-response
-)
-
-for Q in "${QUEUES[@]}"; do
-  aws sqs create-queue \
-    --queue-name "$Q" \
-    --attributes '{
-      "VisibilityTimeout": "300",
-      "MessageRetentionPeriod": "86400",
-      "ReceiveMessageWaitTimeSeconds": "20"
-    }' \
-    --region "$REGION"
-  echo "Created: $Q"
-done
+./examples/send.sh 04_mint.json
 ```
-
-Recommended attributes:
-- `VisibilityTimeout`: 300 s (5 min) — allows time for tx mining + receipt polling (up to 2 min)
-- `MessageRetentionPeriod`: 86400 s (1 day)
-- `ReceiveMessageWaitTimeSeconds`: 20 s (long polling — reduces empty receives)
 
 ---
 
-## IAM Permissions
+## Formato das respostas
 
-The EC2 instance (or ECS task) running `kms-integration` needs the following IAM policy:
+### Sucesso — criação de token (`TOKEN_CREATION`)
+
+```json
+{
+  "event": "token.creation.succeeded",
+  "idempotencyKey": "deploy-erc20-001",
+  "timestamp": "2026-06-29T00:00:00Z",
+  "network": { "name": "besu-local", "chainId": 1337 },
+  "token": {
+    "standard": "ERC20",
+    "name": "Real Brasileiro",
+    "symbol": "BRLN",
+    "contractAddress": "0xContrato..."
+  },
+  "deployment": {
+    "contractAddress": "0xContrato...",
+    "transactionHash": "0xTxHash...",
+    "blockNumber": 42,
+    "gasUsed": "210000"
+  },
+  "metadata": { "correlationId": "corr-001", "processedBy": "kms-integration", "durationMs": 3200 }
+}
+```
+
+### Sucesso — evento de token (`TOKEN_EVENT`: mint, burn, etc.)
+
+```json
+{
+  "event": "token.event.succeeded",
+  "idempotencyKey": "mint-001",
+  "result": {
+    "txHash": "0xTxHash...",
+    "blockNumber": 43,
+    "gasUsed": "80000"
+  },
+  "metadata": { "correlationId": "corr-001", "processedBy": "kms-integration", "durationMs": 1800 }
+}
+```
+
+### Sucesso — criação de wallet (`ACCOUNT_CREATE`)
+
+```json
+{
+  "event": "account.create.succeeded",
+  "userId": "user-abc123",
+  "idempotencyKey": "account-create-001",
+  "wallet": {
+    "id": "arn:aws:kms:us-east-1:123456789012:key/abc-123",
+    "network": "besu-local",
+    "address": "0xEnderecoEthereum..."
+  },
+  "metadata": { "processedBy": "kms-integration", "durationMs": 950 }
+}
+```
+
+### Erro (qualquer operação)
+
+```json
+{
+  "event": "token.creation.failed",
+  "idempotencyKey": "deploy-erc20-001",
+  "error": {
+    "code": "DEPLOYMENT_FAILED",
+    "message": "descrição do erro"
+  },
+  "metadata": { "correlationId": "corr-001", "processedBy": "kms-integration", "durationMs": 120 }
+}
+```
+
+---
+
+## Banco de dados PostgreSQL
+
+O serviço persiste dados em duas tabelas:
+
+### `request_log` — log de todas as requisições
+
+| Coluna | Tipo | Descrição |
+|---|---|---|
+| `id` | UUID | Identificador único |
+| `idempotency_key` | VARCHAR(255) | Chave de idempotência da requisição |
+| `type` | VARCHAR(50) | Tipo da operação (ex: `TOKEN_CREATION`) |
+| `status` | VARCHAR(20) | `RECEIVED`, `COMPLETED` ou `FAILED` |
+| `response_queue` | VARCHAR(512) | Fila de resposta informada na mensagem |
+| `payload` | TEXT | Payload recebido (JSON) |
+| `response` | TEXT | Payload de resposta publicado (JSON) |
+| `error_message` | TEXT | Mensagem de erro em caso de falha |
+| `created_at` | TIMESTAMP | Data/hora de recebimento |
+| `updated_at` | TIMESTAMP | Data/hora da última atualização |
+
+### `wallet` — wallets KMS criadas por usuário
+
+| Coluna | Tipo | Descrição |
+|---|---|---|
+| `id` | UUID | Identificador único |
+| `user_id` | VARCHAR(255) | ID do usuário |
+| `key_id` | VARCHAR(512) | ARN da chave KMS (único por wallet) |
+| `address` | VARCHAR(42) | Endereço Ethereum derivado (único) |
+| `network` | VARCHAR(100) | Rede blockchain (ex: `besu-local`) |
+| `alias` | VARCHAR(255) | Alias KMS criado (`alias/tokeniza-user-{userId}`) |
+| `created_at` | TIMESTAMP | Data/hora de criação |
+
+As migrations são gerenciadas pelo **Liquibase** e executadas automaticamente na inicialização com o usuário `dpl_devops_liquibase`.
+
+---
+
+## Configuração da chave KMS da plataforma
+
+Uma única chave KMS é usada para assinar todas as transações da plataforma (deploy, mint, burn, transfers). Cada usuário tem sua própria chave criada automaticamente via `ACCOUNT_CREATE`.
+
+```bash
+# Criar a chave de plataforma
+KEY_ID=$(aws kms create-key \
+  --key-spec ECC_SECG_P256K1 \
+  --key-usage SIGN_VERIFY \
+  --description "Tokeniza — chave de assinatura da plataforma" \
+  --query KeyMetadata.KeyId --output text)
+
+# Adicionar alias
+aws kms create-alias \
+  --alias-name alias/tokeniza-platform \
+  --target-key-id "$KEY_ID"
+
+echo "KMS_KEY_ID=$KEY_ID"
+```
+
+---
+
+## Fila SQS — criação
+
+```bash
+aws sqs create-queue \
+  --queue-name atoken-integracao-kms-sqs-dev.fifo \
+  --attributes '{
+    "FifoQueue": "true",
+    "ContentBasedDeduplication": "true",
+    "VisibilityTimeout": "300",
+    "MessageRetentionPeriod": "86400",
+    "ReceiveMessageWaitTimeSeconds": "20"
+  }' \
+  --region us-east-1
+```
+
+Atributos recomendados:
+- `VisibilityTimeout`: 300 s — tempo para mineração da transação + polling do recibo
+- `MessageRetentionPeriod`: 86400 s (1 dia)
+- `ReceiveMessageWaitTimeSeconds`: 20 s (long polling)
+
+---
+
+## Permissões IAM
+
+A instância EC2 (ou task ECS) precisa da seguinte política IAM:
 
 ```json
 {
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "SqsAccess",
+      "Sid": "AcessoSQS",
       "Effect": "Allow",
       "Action": [
         "sqs:ReceiveMessage",
         "sqs:DeleteMessage",
         "sqs:GetQueueAttributes",
-        "sqs:SendMessage"
+        "sqs:SendMessage",
+        "sqs:GetQueueUrl",
+        "sqs:CreateQueue"
       ],
-      "Resource": "arn:aws:sqs:REGION:ACCOUNT_ID:kms-*"
+      "Resource": "arn:aws:sqs:REGIAO:CONTA_ID:*"
     },
     {
-      "Sid": "KmsSigningKey",
+      "Sid": "AcessoSNS",
       "Effect": "Allow",
-      "Action": [
-        "kms:Sign",
-        "kms:GetPublicKey"
-      ],
-      "Resource": "arn:aws:kms:REGION:ACCOUNT_ID:key/PLATFORM_KEY_ID"
+      "Action": [ "sns:Publish" ],
+      "Resource": "arn:aws:sns:REGIAO:CONTA_ID:*"
     },
     {
-      "Sid": "KmsUserWallets",
+      "Sid": "ChavePlataforma",
+      "Effect": "Allow",
+      "Action": [ "kms:Sign", "kms:GetPublicKey" ],
+      "Resource": "arn:aws:kms:REGIAO:CONTA_ID:key/ID_CHAVE_PLATAFORMA"
+    },
+    {
+      "Sid": "WalletsUsuarios",
       "Effect": "Allow",
       "Action": [
         "kms:CreateKey",
@@ -130,125 +289,168 @@ The EC2 instance (or ECS task) running `kms-integration` needs the following IAM
         "kms:GetPublicKey"
       ],
       "Resource": "*"
+    },
+    {
+      "Sid": "SecretsManager",
+      "Effect": "Allow",
+      "Action": [ "secretsmanager:GetSecretValue" ],
+      "Resource": "arn:aws:secretsmanager:REGIAO:CONTA_ID:secret:/kms-integration/*"
     }
   ]
 }
 ```
 
-> **Note**: Scope `KmsUserWallets` to a specific key policy or tag condition in production to restrict wallet creation permissions.
-
 ---
 
-## VPC Interface Endpoints (air-gapped environments)
+## VPC Interface Endpoints (ambientes sem internet)
 
-In environments without internet access, create VPC Interface Endpoints for:
+Em ambientes isolados, criar VPC Interface Endpoints para:
 
-| Service | Endpoint service name |
+| Serviço | Nome do endpoint |
 |---|---|
-| SQS | `com.amazonaws.REGION.sqs` |
-| KMS | `com.amazonaws.REGION.kms` |
-| ECR API | `com.amazonaws.REGION.ecr.api` |
-| ECR Docker | `com.amazonaws.REGION.ecr.dkr` |
-| S3 (ECR layers) | `com.amazonaws.REGION.s3` (Gateway endpoint) |
-| CloudWatch Logs | `com.amazonaws.REGION.logs` |
+| SQS | `com.amazonaws.REGIAO.sqs` |
+| SNS | `com.amazonaws.REGIAO.sns` |
+| KMS | `com.amazonaws.REGIAO.kms` |
+| Secrets Manager | `com.amazonaws.REGIAO.secretsmanager` |
+| ECR API | `com.amazonaws.REGIAO.ecr.api` |
+| ECR Docker | `com.amazonaws.REGIAO.ecr.dkr` |
+| S3 (camadas ECR) | `com.amazonaws.REGIAO.s3` (Gateway endpoint) |
 
-Enable **Private DNS** on each interface endpoint so the standard AWS SDK endpoint URLs resolve to the private IPs automatically. No code changes are needed.
+Habilitar **DNS Privado** em cada endpoint para que o SDK AWS resolva automaticamente para os IPs internos. Nenhuma alteração de código é necessária.
 
-If Private DNS is **not** available, override the SQS endpoint via env var:
+Se o DNS privado **não estiver disponível**, sobrescrever via variável de ambiente:
 
 ```bash
-AWS_SQS_ENDPOINT=https://vpce-XXXXX.sqs.REGION.vpce.amazonaws.com
+AWS_SQS_ENDPOINT=https://vpce-XXXXX.sqs.REGIAO.vpce.amazonaws.com
+AWS_SNS_ENDPOINT=https://vpce-XXXXX.sns.REGIAO.vpce.amazonaws.com
 ```
 
 ---
 
-## KMS Key Setup
+## Variáveis de ambiente
 
-### Platform signing key (one per deployment)
-
-```bash
-# Create the platform key
-KEY_ID=$(aws kms create-key \
-  --key-spec ECC_SECG_P256K1 \
-  --key-usage SIGN_VERIFY \
-  --description "Tokeniza platform signing key" \
-  --query KeyMetadata.KeyId --output text)
-
-# Add alias
-aws kms create-alias \
-  --alias-name alias/tokeniza-platform \
-  --target-key-id "$KEY_ID"
-
-echo "KMS_KEY_ID=$KEY_ID"
-```
-
-### User wallet keys
-
-Created automatically by `AccountConsumer` when the BFF publishes an `account-create-request`. Each user gets a dedicated `ECC_SECG_P256K1 / SIGN_VERIFY` key with alias `alias/tokeniza-user-{userId}`. The Key ID is stored as `walletId` in the BFF's MongoDB.
-
----
-
-## Environment Variables
-
-| Variable | Required | Default | Description |
+| Variável | Obrigatória | Padrão | Descrição |
 |---|---|---|---|
-| `KMS_KEY_ID` | **yes** | — | Platform KMS key ARN or ID |
-| `DLT_RPC_ENDPOINT` | **yes** | — | Blockchain JSON-RPC URL (e.g. `http://validator:8545`) |
-| `AWS_REGION` | no | `us-east-1` | AWS region |
-| `DLT_CHAIN_ID` | no | `1337` | EVM chain ID |
-| `DLT_GAS_LIMIT` | no | `300000` | Gas limit per transaction |
-| `DLT_MAX_FEE_PER_GAS` | no | `0` | EIP-1559 max fee (wei); 0 = free gas |
-| `DLT_MAX_PRIORITY_FEE_PER_GAS` | no | `0` | EIP-1559 priority fee (wei) |
-| `DLT_EXPLORER_URL` | no | — | Block explorer base URL (optional, for response metadata) |
-| `DLT_GAS_FUND_AMOUNT_ETH` | no | `0.001` | Native token amount sent to new wallets |
-| `AWS_SQS_ENDPOINT` | no | — | Override SQS endpoint (VPC endpoint URL) |
-| `SQS_TOKEN_CREATION_REQUEST` | no | `kms-token-creation-request` | Queue name override |
-| `SQS_TOKEN_CREATION_RESPONSE` | no | `kms-token-creation-response` | Queue name override |
-| `SQS_BALANCE_REQUEST` | no | `kms-balance-request` | Queue name override |
-| `SQS_BALANCE_RESPONSE` | no | `kms-balance-response` | Queue name override |
-| `SQS_TOKEN_EVENT_REQUEST` | no | `kms-token-event-request` | Queue name override |
-| `SQS_TOKEN_EVENT_RESPONSE` | no | `kms-token-event-response` | Queue name override |
-| `SQS_TOKEN_TRANSFER_REQUEST` | no | `kms-token-transfer-request` | Queue name override |
-| `SQS_TOKEN_TRANSFER_RESPONSE` | no | `kms-token-transfer-response` | Queue name override |
-| `SQS_ACCOUNT_CREATE_REQUEST` | no | `kms-account-create-request` | Queue name override |
-| `SQS_ACCOUNT_CREATE_RESPONSE` | no | `kms-account-create-response` | Queue name override |
-| `SQS_USER_TRANSFER_REQUEST` | no | `kms-user-transfer-request` | Queue name override |
-| `SQS_USER_TRANSFER_RESPONSE` | no | `kms-user-transfer-response` | Queue name override |
-| `BYTECODE_ERC20` | conditional | — | Compiled ERC-20 bytecode (required for token deployment) |
-| `BYTECODE_ERC721` | conditional | — | Compiled ERC-721 bytecode |
-| `BYTECODE_ERC1155` | conditional | — | Compiled ERC-1155 bytecode |
-| `SENTRY_DSN` | no | — | Sentry DSN for error tracking |
+| `KMS_KEY_ID` | **sim** | — | ARN ou ID da chave KMS da plataforma |
+| `DLT_RPC_ENDPOINT` | **sim** | — | URL JSON-RPC do nó blockchain (ex: `http://validador:8545`) |
+| `SNS_TOPIC_ARN` | **sim** | — | ARN do tópico SNS FIFO para respostas sem `responseQueue` |
+| `DB_PASSWORD` | **sim** | — | Senha do usuário `kms_app` no PostgreSQL |
+| `DB_LIQUIBASE_PASSWORD` | **sim** | — | Senha do usuário `dpl_devops_liquibase` |
+| `AWS_REGION` | não | `us-east-1` | Região AWS |
+| `SQS_QUEUE_NAME` | não | `atoken-integracao-kms-sqs-dev.fifo` | Nome da fila SQS de entrada |
+| `DB_HOST` | não | `192.168.15.5` | Host do PostgreSQL |
+| `DB_PORT` | não | `5432` | Porta do PostgreSQL |
+| `DB_NAME` | não | `kms_db` | Nome do banco de dados |
+| `DB_USERNAME` | não | `kms_app` | Usuário da aplicação no PostgreSQL |
+| `DB_LIQUIBASE_USER` | não | `dpl_devops_liquibase` | Usuário para migrations Liquibase |
+| `DLT_CHAIN_ID` | não | `1337` | Chain ID da rede EVM |
+| `DLT_GAS_LIMIT` | não | `10000000` | Limite de gas por transação |
+| `DLT_MAX_FEE_PER_GAS` | não | `0` | Máximo fee EIP-1559 (wei); 0 = gas gratuito |
+| `DLT_MAX_PRIORITY_FEE_PER_GAS` | não | `0` | Priority fee EIP-1559 (wei) |
+| `DLT_GAS_FUND_AMOUNT_ETH` | não | `0.001` | Valor em ETH enviado para novas wallets (fundo de gas) |
+| `DLT_EXPLORER_URL` | não | — | URL base do explorador de blocos (opcional, para metadata) |
+| `AWS_SQS_ENDPOINT` | não | — | Endpoint SQS alternativo (VPC endpoint ou LocalStack) |
+| `AWS_SNS_ENDPOINT` | não | — | Endpoint SNS alternativo |
+| `AWS_SECRETSMANAGER_ENDPOINT` | não | — | Endpoint Secrets Manager alternativo |
+| `BYTECODE_ERC20` | condicional | — | Bytecode compilado do contrato ERC-20 |
+| `BYTECODE_ERC721` | condicional | — | Bytecode compilado do contrato ERC-721 |
+| `BYTECODE_ERC1155` | condicional | — | Bytecode compilado do contrato ERC-1155 |
+
+### Credenciais via AWS Secrets Manager
+
+Em produção, as credenciais do banco de dados podem ser carregadas automaticamente do Secrets Manager. O segredo deve ser um JSON plano no caminho `/kms-integration/rds-credentials`:
+
+```json
+{
+  "DB_HOST": "...",
+  "DB_USERNAME": "kms_app",
+  "DB_PASSWORD": "...",
+  "DB_LIQUIBASE_PASSWORD": "..."
+}
+```
 
 ---
 
-## Running with Docker
+## Executando com Docker
 
 ```bash
 docker run -d \
   --name kms-integration \
   --env-file .env \
+  -p 8090:8080 \
   --restart unless-stopped \
-  ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/kms-integration:latest
+  CONTA_ID.dkr.ecr.REGIAO.amazonaws.com/kms-integration:latest
 ```
-
-The container has no exposed ports. All communication is outbound via SQS.
 
 ---
 
-## Building
+## Ambiente local de testes (LocalStack)
+
+Para rodar localmente sem AWS real, utilize o LocalStack:
+
+```bash
+# Iniciar LocalStack
+docker run -d --name localstack \
+  -p 4566:4566 \
+  -e SERVICES=sqs,sns,kms \
+  localstack/localstack:3
+
+# Criar fila SQS FIFO
+aws --endpoint-url=http://localhost:4566 --no-sign-request \
+  sqs create-queue \
+  --queue-name atoken-integracao-kms-sqs-dev.fifo \
+  --attributes FifoQueue=true,ContentBasedDeduplication=true
+
+# Criar tópico SNS FIFO
+aws --endpoint-url=http://localhost:4566 --no-sign-request \
+  sns create-topic \
+  --name kms-integration-responses.fifo \
+  --attributes FifoTopic=true,ContentBasedDeduplication=true
+
+# Criar chave KMS de teste
+aws --endpoint-url=http://localhost:4566 --no-sign-request \
+  kms create-key \
+  --key-usage SIGN_VERIFY \
+  --key-spec ECC_SECG_P256K1
+```
+
+Configurar no `.env`:
+
+```
+AWS_ACCESS_KEY_ID=dummy
+AWS_SECRET_ACCESS_KEY=dummy
+AWS_SQS_ENDPOINT=http://localhost:4566
+AWS_SNS_ENDPOINT=http://localhost:4566
+AWS_SECRETSMANAGER_ENDPOINT=http://localhost:4566
+KMS_KEY_ID=<id-retornado-pelo-create-key>
+```
+
+---
+
+## Build
 
 ```bash
 mvn clean package -DskipTests
 ```
 
-The resulting JAR is at `target/kms-integration-1.0.0.jar`. The `spring-boot-maven-plugin` produces a self-contained executable JAR.
+O JAR gerado fica em `target/kms-integration-1.0.0.jar`.
 
 ---
 
-## Running Tests
+## Testes
 
 ```bash
 mvn test
 ```
 
-Tests use Mockito — no running AWS services are required.
+Os testes utilizam Mockito — nenhum serviço AWS real é necessário.
+
+---
+
+## Wallets por usuário — granularidade
+
+**1 chave KMS = 1 endereço Ethereum = 1 wallet.**
+
+O endereço Ethereum é derivado da chave pública da chave KMS. A mesma chave funciona em todas as redes EVM (Besu local, Sepolia, mainnet) — o `chainId` vai na transação, não na chave.
+
+Ao criar uma wallet (`ACCOUNT_CREATE`), o BFF recebe o `keyId` (ARN da chave KMS) e o `address` (endereço Ethereum). O `keyId` deve ser armazenado como `walletId` do usuário. Nas operações de transferência do usuário (`USER_TRANSFER`), o campo `userWalletId` deve conter esse `keyId`.
