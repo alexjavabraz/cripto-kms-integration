@@ -33,6 +33,20 @@ Todos os serviços AWS (SQS, SNS, KMS, Secrets Manager) são acessados via **VPC
 
 ---
 
+## Wallet da plataforma (admin)
+
+Na **primeira inicialização**, o serviço verifica se existe uma wallet com papel `ADMIN` no banco de dados:
+
+- Se `KMS_KEY_ID` estiver configurado e a wallet ainda não estiver no banco: registra a chave como wallet admin.
+- Se `KMS_KEY_ID` **não** estiver configurado e não houver wallet admin no banco: **cria automaticamente uma nova chave KMS** (ECC_SECG_P256K1 / SIGN_VERIFY), deriva o endereço Ethereum, persiste no banco com `role=ADMIN` e define o `KMS_KEY_ID` em runtime.
+- Nas inicializações seguintes: carrega a wallet admin existente do banco — nenhuma chave nova é criada.
+
+Essa wallet é usada para todas as operações da plataforma (deploy de contratos, mint, burn, pause, unpause, transferências da plataforma). Cada usuário tem sua própria chave KMS, criada via `ACCOUNT_CREATE`.
+
+> **`KMS_KEY_ID` é opcional.** Se não configurado, a chave é auto-provisionada no primeiro startup.
+
+---
+
 ## Tipos de mensagem
 
 Todas as mensagens chegam na mesma fila SQS. O campo `type` determina o roteamento.
@@ -44,13 +58,13 @@ Todas as mensagens chegam na mesma fila SQS. O campo `type` determina o roteamen
 | `TOKEN_TRANSFER` | Transferência de tokens pela wallet da plataforma | `TransferConsumer` |
 | `USER_TRANSFER` | Transferência de tokens pela wallet KMS do usuário | `UserTransferConsumer` |
 | `BALANCE_QUERY` | Consulta de saldo ERC-20 | `BalanceConsumer` |
-| `ACCOUNT_CREATE` | Criação de wallet KMS para novo usuário | `AccountConsumer` |
+| `ACCOUNT_CREATE` | Criação de wallet KMS para novo cliente | `AccountConsumer` |
 
 ---
 
 ## Formato das mensagens
 
-### Campo obrigatório em todas as mensagens
+### Campos obrigatórios em todas as mensagens
 
 ```json
 {
@@ -84,13 +98,29 @@ A pasta `examples/` contém um JSON de exemplo para cada operação:
 | `08_pause.json` | Pausar contrato |
 | `09_unpause.json` | Despausar contrato |
 | `10_balance.json` | Consulta de saldo |
-| `11_account_create.json` | Criar wallet KMS para usuário |
+| `11_account_create.json` | Criar wallet KMS para cliente |
 
 Para enviar um exemplo para a fila (LocalStack ou AWS):
 
 ```bash
 ./examples/send.sh 04_mint.json
 ```
+
+### Exemplo — criação de conta (`ACCOUNT_CREATE`)
+
+```json
+{
+  "type": "ACCOUNT_CREATE",
+  "idempotencyKey": "account-create-001",
+  "responseQueue": "https://sqs.us-east-1.amazonaws.com/123456789012/minha-fila-resposta.fifo",
+  "event": "account.create.requested",
+  "clientId": "cliente-abc123"
+}
+```
+
+- **`clientId`** — identificador único do cliente no sistema do chamador. Definido pelo BFF; o `keyId` interno do KMS nunca é exposto.
+- **`network` não é necessário** — o endereço EVM é derivado da chave pública e é válido em todas as redes EVM (Besu, Sepolia, mainnet etc.).
+- **Idempotência por `clientId`**: se o mesmo `clientId` for enviado mais de uma vez, o serviço retorna o endereço já existente sem criar nova chave KMS, mesmo que o `idempotencyKey` seja diferente.
 
 ---
 
@@ -140,16 +170,17 @@ Para enviar um exemplo para a fila (LocalStack ou AWS):
 ```json
 {
   "event": "account.create.succeeded",
-  "userId": "user-abc123",
+  "clientId": "cliente-abc123",
   "idempotencyKey": "account-create-001",
   "wallet": {
-    "id": "arn:aws:kms:us-east-1:123456789012:key/abc-123",
-    "network": "besu-local",
     "address": "0xEnderecoEthereum..."
   },
+  "timestamp": "2026-06-29T00:00:00Z",
   "metadata": { "processedBy": "kms-integration", "durationMs": 950 }
 }
 ```
+
+> O `keyId` interno do KMS **não é retornado** na resposta. O BFF deve usar o `address` para identificar a wallet do cliente em operações futuras.
 
 ### Erro (qualquer operação)
 
@@ -169,7 +200,7 @@ Para enviar um exemplo para a fila (LocalStack ou AWS):
 
 ## Banco de dados PostgreSQL
 
-O serviço persiste dados em duas tabelas:
+O serviço persiste dados em duas tabelas, gerenciadas pelo **Liquibase** (migrations executadas automaticamente no startup com o usuário `dpl_devops_liquibase`).
 
 ### `request_log` — log de todas as requisições
 
@@ -186,25 +217,44 @@ O serviço persiste dados em duas tabelas:
 | `created_at` | TIMESTAMP | Data/hora de recebimento |
 | `updated_at` | TIMESTAMP | Data/hora da última atualização |
 
-### `wallet` — wallets KMS criadas por usuário
+### `wallet` — wallets KMS
 
 | Coluna | Tipo | Descrição |
 |---|---|---|
 | `id` | UUID | Identificador único |
-| `user_id` | VARCHAR(255) | ID do usuário |
-| `key_id` | VARCHAR(512) | ARN da chave KMS (único por wallet) |
-| `address` | VARCHAR(42) | Endereço Ethereum derivado (único) |
-| `network` | VARCHAR(100) | Rede blockchain (ex: `besu-local`) |
-| `alias` | VARCHAR(255) | Alias KMS criado (`alias/tokeniza-user-{userId}`) |
+| `user_id` | VARCHAR(255) | `clientId` do cliente (ou `"platform"` para a wallet admin) |
+| `key_id` | VARCHAR(512) | ARN da chave KMS — uso interno, nunca exposto ao chamador |
+| `address` | VARCHAR(42) | Endereço Ethereum derivado (único, válido em todas as redes EVM) |
+| `network` | VARCHAR(100) | `"evm"` para wallets de cliente; `"platform"` para wallet admin |
+| `alias` | VARCHAR(255) | Alias KMS (`alias/tokeniza-client-{clientId}` ou `alias/tokeniza-platform-admin`) |
+| `role` | VARCHAR(20) | `"ADMIN"` (wallet da plataforma) ou `"USER"` (wallet de cliente) |
 | `created_at` | TIMESTAMP | Data/hora de criação |
 
-As migrations são gerenciadas pelo **Liquibase** e executadas automaticamente na inicialização com o usuário `dpl_devops_liquibase`.
+---
+
+## Contratos Solidity
+
+Os bytecodes dos contratos ERC-20, ERC-721 e ERC-1155 são **compilados no build** a partir dos fontes em `src/main/solidity/` usando o `web3j-maven-plugin`. As classes Java geradas (com a constante `BINARY`) ficam em `target/generated-sources/web3j/`.
+
+Não há variáveis de ambiente para bytecode — basta editar os arquivos `.sol` e recompilar com `mvn package`.
+
+| Arquivo | Contrato |
+|---|---|
+| `src/main/solidity/TokenizaERC20.sol` | ERC-20 com mint, burn, pause/unpause, transferOwnership |
+| `src/main/solidity/TokenizaERC721.sol` | ERC-721 com mint, burn, pause/unpause, setBaseUri |
+| `src/main/solidity/TokenizaERC1155.sol` | ERC-1155 com mint, mintBatch, burn, pause/unpause, setUri |
 
 ---
 
 ## Configuração da chave KMS da plataforma
 
-Uma única chave KMS é usada para assinar todas as transações da plataforma (deploy, mint, burn, transfers). Cada usuário tem sua própria chave criada automaticamente via `ACCOUNT_CREATE`.
+A wallet admin pode ser **auto-provisionada** (recomendado) ou pré-configurada via variável de ambiente.
+
+### Opção 1 — Auto-provisionamento (sem `KMS_KEY_ID`)
+
+Não configure `KMS_KEY_ID`. Na primeira inicialização, o serviço cria automaticamente uma chave KMS ECC_SECG_P256K1, registra no banco com `role=ADMIN` e a usa como assinador da plataforma. Nas inicializações seguintes, a chave é carregada do banco.
+
+### Opção 2 — Chave pré-existente
 
 ```bash
 # Criar a chave de plataforma
@@ -216,11 +266,13 @@ KEY_ID=$(aws kms create-key \
 
 # Adicionar alias
 aws kms create-alias \
-  --alias-name alias/tokeniza-platform \
+  --alias-name alias/tokeniza-platform-admin \
   --target-key-id "$KEY_ID"
 
 echo "KMS_KEY_ID=$KEY_ID"
 ```
+
+Configurar `KMS_KEY_ID=$KEY_ID` no `.env`. Na primeira inicialização, a chave é registrada automaticamente no banco com `role=ADMIN`.
 
 ---
 
@@ -274,13 +326,7 @@ A instância EC2 (ou task ECS) precisa da seguinte política IAM:
       "Resource": "arn:aws:sns:REGIAO:CONTA_ID:*"
     },
     {
-      "Sid": "ChavePlataforma",
-      "Effect": "Allow",
-      "Action": [ "kms:Sign", "kms:GetPublicKey" ],
-      "Resource": "arn:aws:kms:REGIAO:CONTA_ID:key/ID_CHAVE_PLATAFORMA"
-    },
-    {
-      "Sid": "WalletsUsuarios",
+      "Sid": "ChavePlataformaEUsuarios",
       "Effect": "Allow",
       "Action": [
         "kms:CreateKey",
@@ -299,6 +345,8 @@ A instância EC2 (ou task ECS) precisa da seguinte política IAM:
   ]
 }
 ```
+
+> `kms:CreateKey` e `kms:CreateAlias` são necessários tanto para o auto-provisionamento da wallet admin quanto para a criação de wallets de clientes via `ACCOUNT_CREATE`.
 
 ---
 
@@ -331,11 +379,11 @@ AWS_SNS_ENDPOINT=https://vpce-XXXXX.sns.REGIAO.vpce.amazonaws.com
 
 | Variável | Obrigatória | Padrão | Descrição |
 |---|---|---|---|
-| `KMS_KEY_ID` | **sim** | — | ARN ou ID da chave KMS da plataforma |
 | `DLT_RPC_ENDPOINT` | **sim** | — | URL JSON-RPC do nó blockchain (ex: `http://validador:8545`) |
 | `SNS_TOPIC_ARN` | **sim** | — | ARN do tópico SNS FIFO para respostas sem `responseQueue` |
 | `DB_PASSWORD` | **sim** | — | Senha do usuário `kms_app` no PostgreSQL |
 | `DB_LIQUIBASE_PASSWORD` | **sim** | — | Senha do usuário `dpl_devops_liquibase` |
+| `KMS_KEY_ID` | não | — | ARN ou ID da chave KMS da plataforma. Se omitido, é auto-provisionado no primeiro startup |
 | `AWS_REGION` | não | `us-east-1` | Região AWS |
 | `SQS_QUEUE_NAME` | não | `atoken-integracao-kms-sqs-dev.fifo` | Nome da fila SQS de entrada |
 | `DB_HOST` | não | `192.168.15.5` | Host do PostgreSQL |
@@ -352,9 +400,6 @@ AWS_SNS_ENDPOINT=https://vpce-XXXXX.sns.REGIAO.vpce.amazonaws.com
 | `AWS_SQS_ENDPOINT` | não | — | Endpoint SQS alternativo (VPC endpoint ou LocalStack) |
 | `AWS_SNS_ENDPOINT` | não | — | Endpoint SNS alternativo |
 | `AWS_SECRETSMANAGER_ENDPOINT` | não | — | Endpoint Secrets Manager alternativo |
-| `BYTECODE_ERC20` | condicional | — | Bytecode compilado do contrato ERC-20 |
-| `BYTECODE_ERC721` | condicional | — | Bytecode compilado do contrato ERC-721 |
-| `BYTECODE_ERC1155` | condicional | — | Bytecode compilado do contrato ERC-1155 |
 
 ### Credenciais via AWS Secrets Manager
 
@@ -406,13 +451,9 @@ aws --endpoint-url=http://localhost:4566 --no-sign-request \
   sns create-topic \
   --name kms-integration-responses.fifo \
   --attributes FifoTopic=true,ContentBasedDeduplication=true
-
-# Criar chave KMS de teste
-aws --endpoint-url=http://localhost:4566 --no-sign-request \
-  kms create-key \
-  --key-usage SIGN_VERIFY \
-  --key-spec ECC_SECG_P256K1
 ```
+
+Com LocalStack, **não** é necessário criar a chave KMS manualmente — o serviço a cria automaticamente no startup.
 
 Configurar no `.env`:
 
@@ -422,7 +463,7 @@ AWS_SECRET_ACCESS_KEY=dummy
 AWS_SQS_ENDPOINT=http://localhost:4566
 AWS_SNS_ENDPOINT=http://localhost:4566
 AWS_SECRETSMANAGER_ENDPOINT=http://localhost:4566
-KMS_KEY_ID=<id-retornado-pelo-create-key>
+# KMS_KEY_ID não é necessário — será criado automaticamente
 ```
 
 ---
@@ -435,6 +476,8 @@ mvn clean package -DskipTests
 
 O JAR gerado fica em `target/kms-integration-1.0.0.jar`.
 
+Durante o build, o `web3j-maven-plugin` compila automaticamente os contratos Solidity em `src/main/solidity/` e gera as classes Java com os bytecodes em `target/generated-sources/web3j/`.
+
 ---
 
 ## Testes
@@ -443,14 +486,16 @@ O JAR gerado fica em `target/kms-integration-1.0.0.jar`.
 mvn test
 ```
 
-Os testes utilizam Mockito — nenhum serviço AWS real é necessário.
+Os testes unitários utilizam Mockito — nenhum serviço AWS real é necessário. O teste de integração `CreationConsumerIntegrationTest` requer Docker (inicia um container Ganache automaticamente via Testcontainers).
 
 ---
 
-## Wallets por usuário — granularidade
+## Wallets por cliente — granularidade e segurança
 
 **1 chave KMS = 1 endereço Ethereum = 1 wallet.**
 
-O endereço Ethereum é derivado da chave pública da chave KMS. A mesma chave funciona em todas as redes EVM (Besu local, Sepolia, mainnet) — o `chainId` vai na transação, não na chave.
+O endereço Ethereum é derivado da chave pública da chave KMS. A mesma chave funciona em todas as redes EVM (Besu, Sepolia, mainnet etc.) — o `chainId` vai na transação, não na chave.
 
-Ao criar uma wallet (`ACCOUNT_CREATE`), o BFF recebe o `keyId` (ARN da chave KMS) e o `address` (endereço Ethereum). O `keyId` deve ser armazenado como `walletId` do usuário. Nas operações de transferência do usuário (`USER_TRANSFER`), o campo `userWalletId` deve conter esse `keyId`.
+**O `keyId` (ARN da chave KMS) é interno ao kms-integration e nunca é exposto ao BFF ou ao usuário final.** A resposta do `ACCOUNT_CREATE` retorna apenas o `address` e o `clientId` enviado pelo BFF. O BFF deve armazenar o `address` como identificador da wallet do cliente.
+
+Nas operações de transferência do usuário (`USER_TRANSFER`), o campo `userWalletId` deve conter o `address` (ou o `clientId`, dependendo de como o BFF rastrear a associação internamente). O kms-integration busca o `keyId` correspondente no banco de dados pelo endereço ou pelo clientId para assinar a transação.
