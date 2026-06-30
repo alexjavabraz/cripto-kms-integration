@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -11,6 +12,7 @@ import java.util.List;
 
 @Slf4j
 @Component
+@Order(2)
 @RequiredArgsConstructor
 public class StartupValidator implements ApplicationRunner {
 
@@ -20,8 +22,9 @@ public class StartupValidator implements ApplicationRunner {
     public void run(ApplicationArguments args) {
         List<String> errors = new ArrayList<>();
 
+        // KMS_KEY_ID validated after PlatformWalletInitializer (Order 1) has resolved it
         if (blank(props.getKeyId())) {
-            errors.add("KMS_KEY_ID (kms.key-id) — platform signing key is required");
+            errors.add("KMS_KEY_ID — platform signing key could not be resolved (check DB or env var)");
         }
         if (blank(props.getDlt().getRpcEndpoint())) {
             errors.add("DLT_RPC_ENDPOINT (kms.dlt.rpc-endpoint) — blockchain RPC URL is required");
@@ -46,9 +49,9 @@ public class StartupValidator implements ApplicationRunner {
             throw new IllegalStateException(msg);
         }
 
-        log.info("Startup validation passed — region={} chainId={} rpc={} sqs={} sns={}",
+        log.info("Startup validation passed — region={} chainId={} rpc={} sqs={} sns={} platformKey={}",
                 props.getRegion(), props.getDlt().getChainId(), props.getDlt().getRpcEndpoint(),
-                props.getSqs().getQueueName(), props.getSns().getTopicArn());
+                props.getSqs().getQueueName(), props.getSns().getTopicArn(), props.getKeyId());
     }
 
     private static boolean blank(String s) {

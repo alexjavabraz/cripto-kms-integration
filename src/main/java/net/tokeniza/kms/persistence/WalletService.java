@@ -17,15 +17,25 @@ public class WalletService {
 
     @Transactional
     public Wallet save(String userId, String keyId, String address, String network, String alias) {
+        return save(userId, keyId, address, network, alias, "USER");
+    }
+
+    @Transactional
+    public Wallet save(String userId, String keyId, String address, String network, String alias, String role) {
         Wallet wallet = new Wallet();
         wallet.setUserId(userId);
         wallet.setKeyId(keyId);
         wallet.setAddress(address);
         wallet.setNetwork(network);
         wallet.setAlias(alias);
+        wallet.setRole(role);
         Wallet saved = repository.save(wallet);
-        log.info("Wallet persisted: userId={} keyId={} address={} network={}", userId, keyId, address, network);
+        log.info("Wallet persisted: userId={} keyId={} address={} network={} role={}", userId, keyId, address, network, role);
         return saved;
+    }
+
+    public Optional<Wallet> findAdminWallet() {
+        return repository.findFirstByRole("ADMIN");
     }
 
     public List<Wallet> findByUserId(String userId) {

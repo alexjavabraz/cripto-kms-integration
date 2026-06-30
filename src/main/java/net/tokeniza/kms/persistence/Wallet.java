@@ -34,6 +34,10 @@ public class Wallet {
     @Column(length = 255)
     private String alias;
 
+    /** ADMIN = platform wallet for deployments; USER = end-user wallet for transfers. */
+    @Column(nullable = false, length = 20)
+    private String role = "USER";
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;

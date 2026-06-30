@@ -18,6 +18,7 @@ public class KmsClientConfig {
 
     @Bean
     public KmsSigner platformSigner(KmsClient kmsClient, AppProperties props) {
-        return new KmsSigner(kmsClient, props.getKeyId());
+        // Key ID resolved via supplier so PlatformWalletInitializer can set it before first use
+        return new KmsSigner(kmsClient, props::getKeyId);
     }
 }

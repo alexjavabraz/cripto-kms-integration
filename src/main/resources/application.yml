@@ -54,7 +54,7 @@ management:
 
 kms:
   region: ${AWS_REGION:us-east-1}
-  key-id: ${KMS_KEY_ID}
+  key-id: ${KMS_KEY_ID:}
   wallet-address: ${KMS_WALLET_ADDRESS:}
 
   dlt:

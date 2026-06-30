@@ -5,3 +5,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/migrations/002_create_wallet.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/migrations/003_add_wallet_role.sql
+      relativeToChangelogFile: false

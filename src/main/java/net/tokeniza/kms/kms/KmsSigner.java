@@ -31,14 +31,20 @@ public class KmsSigner {
     private static final BigInteger SECP256K1_HALF_N = SECP256K1_N.divide(BigInteger.TWO);
 
     private final KmsClient kmsClient;
-    private final String keyId;
+    private final java.util.function.Supplier<String> keyIdSupplier;
 
     private String cachedAddress;
     private BigInteger cachedPublicKey;
 
     public KmsSigner(KmsClient kmsClient, String keyId) {
         this.kmsClient = kmsClient;
-        this.keyId = keyId;
+        this.keyIdSupplier = () -> keyId;
+    }
+
+    /** Used by the platform signer so the key ID can be resolved after Spring startup. */
+    public KmsSigner(KmsClient kmsClient, java.util.function.Supplier<String> keyIdSupplier) {
+        this.kmsClient = kmsClient;
+        this.keyIdSupplier = keyIdSupplier;
     }
 
     // ── Public API ────────────────────────────────────────────────────────────
@@ -52,7 +58,7 @@ public class KmsSigner {
             BigInteger pubKey = fetchPublicKey();
             cachedPublicKey = pubKey;
             cachedAddress = "0x" + Keys.getAddress(pubKey);
-            log.info("KMS wallet address derived: {}", cachedAddress);
+            log.info("KMS wallet address derived: {} keyId={}", cachedAddress, keyIdSupplier.get());
         }
         return cachedAddress;
     }
@@ -71,7 +77,7 @@ public class KmsSigner {
         getAddress();
 
         SignResponse response = kmsClient.sign(SignRequest.builder()
-                .keyId(keyId)
+                .keyId(keyIdSupplier.get())
                 .message(SdkBytes.fromByteArray(digest))
                 .messageType(MessageType.DIGEST)
                 .signingAlgorithm(SigningAlgorithmSpec.ECDSA_SHA_256)
@@ -104,7 +110,7 @@ public class KmsSigner {
             }
         }
 
-        throw new RuntimeException("KMS sign: could not determine recovery id for key " + keyId);
+        throw new RuntimeException("KMS sign: could not determine recovery id for key " + keyIdSupplier.get());
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
@@ -115,7 +121,7 @@ public class KmsSigner {
      */
     private BigInteger fetchPublicKey() {
         GetPublicKeyResponse response = kmsClient.getPublicKey(
-                GetPublicKeyRequest.builder().keyId(keyId).build());
+                GetPublicKeyRequest.builder().keyId(keyIdSupplier.get()).build());
 
         byte[] der = response.publicKey().asByteArray();
         // SubjectPublicKeyInfo for secp256k1: last 65 bytes = 0x04 || x (32) || y (32)
